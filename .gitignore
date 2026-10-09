@@ -7,6 +7,8 @@ dist/
 # Environnement
 .env
 .env.local
+.env.*
+!.env.example
 
 # Données runtime (volume)
 .data/
@@ -19,3 +21,8 @@ coverage/
 *.log
 npm-debug.log*
 .DS_Store
+*.tsbuildinfo
+
+# Éditeurs
+.vscode/
+.idea/
