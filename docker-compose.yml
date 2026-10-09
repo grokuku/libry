@@ -1,0 +1,44 @@
+# ─── Libry — stack docker-compose (service séparé, jamais fusionné avec WebClaw) ───
+#
+# Ce fichier ne monte QUE Libry. WebClaw reste un service TIERS intouchable,
+# ajouté séparément par l'utilisateur dans la même stack : le nom `webclaw` est
+# alors résolu par le réseau Docker interne (WEBCLAW_URL=http://webclaw:3000).
+#
+# Chaque service garde son image et son cycle de vie : Libry embarque SON propre
+# Chromium (WebClaw ne fait ni capture ni rendu JS — fonctionnalité fermée).
+services:
+  libry:
+    build: .
+    image: libry:0.1.0
+    container_name: libry
+    ports:
+      - "3007:3007"
+    environment:
+      # Serveur / données
+      LIBRY_HOST: "0.0.0.0"
+      LIBRY_PORT: "3007"
+      LIBRY_DATA_DIR: "/app/data"
+      # Accès (CORS + clés). Injecter les secrets par l'environnement hôte.
+      LIBRY_ALLOWED_ORIGINS: "${LIBRY_ALLOWED_ORIGINS:-}"
+      LIBRY_ADMIN_KEYS: "${LIBRY_ADMIN_KEYS:-}"
+      LIBRY_LEGACY_KEYS: "${LIBRY_LEGACY_KEYS:-}"
+      LIBRY_RATE_LIMIT_PER_MIN: "${LIBRY_RATE_LIMIT_PER_MIN:-600}"
+      # Capture d'écran
+      CHROMIUM_PATH: "/usr/bin/chromium"
+      LIBRY_SHOT_CONCURRENCY: "${LIBRY_SHOT_CONCURRENCY:-2}"
+      LIBRY_SHOT_QUEUE_MAX: "${LIBRY_SHOT_QUEUE_MAX:-4}"
+      LIBRY_SHOT_TTL_HOURS: "${LIBRY_SHOT_TTL_HOURS:-168}"
+      LIBRY_SHOT_INLINE_HTML: "${LIBRY_SHOT_INLINE_HTML:-false}"
+      LIBRY_CHROMIUM_NO_SANDBOX: "${LIBRY_CHROMIUM_NO_SANDBOX:-false}"
+      # Service tiers WebClaw (résolu sur le réseau de la stack)
+      WEBCLAW_URL: "${WEBCLAW_URL:-http://webclaw:3000}"
+      WEBCLAW_API_KEY: "${WEBCLAW_API_KEY:-}"
+    volumes:
+      # Volume DÉDIÉ à Libry — ne partage JAMAIS celui de Pi-Web.
+      - libry-data:/app/data
+    # Chromium headless : /dev/shm trop petit par défaut fait planter le rendu.
+    shm_size: "512m"
+    restart: unless-stopped
+
+volumes:
+  libry-data:

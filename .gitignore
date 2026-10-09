@@ -1,0 +1,21 @@
+# Dépendances
+node_modules/
+
+# Build
+dist/
+
+# Environnement
+.env
+.env.local
+
+# Données runtime (volume)
+.data/
+data/
+
+# Tests / couverture
+coverage/
+
+# Divers
+*.log
+npm-debug.log*
+.DS_Store
