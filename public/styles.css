@@ -220,8 +220,8 @@ html[data-theme$="-light"] .theme-toggle .icon--moon {
 .content {
   flex: 1;
   width: 100%;
-  max-width: 1080px;
-  margin: 0 auto;
+  /* Pleine largeur : aucune colonne centrée — le contenu occupe tout
+     l'espace disponible et suit le redimensionnement de la fenêtre. */
   padding: 22px;
 }
 
@@ -481,6 +481,8 @@ code {
   border-radius: 4px;
   background: var(--libry-bg-hover);
   font-size: 0.9em;
+  /* Une longue signature sans espace ne dépasse jamais sa ligne. */
+  overflow-wrap: anywhere;
 }
 
 .banner {
@@ -637,6 +639,9 @@ code {
   border-radius: var(--libry-radius);
   background: var(--libry-bg-raised);
   min-height: 120px;
+  /* Colonne de grille : autorise le rétrécissement (min-content des blocs
+     de code) au lieu de forcer la largeur du panneau. */
+  min-width: 0;
 }
 
 .detail-head {
@@ -686,7 +691,11 @@ code {
   margin-bottom: 4px;
 }
 
-.detail-section pre {
+/* Blocs de texte brut / code : exemples du détail ET « Contenu brut » du
+   <details>. Les lignes longues reviennent à la ligne (le <pre> brut n'était
+   couvert par aucune règle : il débordait du panneau et était coupé). */
+.detail-section pre,
+.disclosure pre {
   margin: 0 0 10px;
   padding: 12px;
   overflow: auto;
@@ -694,10 +703,16 @@ code {
   border-radius: calc(var(--libry-radius) - 4px);
   background: var(--libry-bg);
   font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .detail-section pre:last-child {
   margin-bottom: 0;
+}
+
+.disclosure pre {
+  margin: 10px 0 0;
 }
 
 .doc-summary {
