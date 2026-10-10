@@ -72,6 +72,11 @@ describe("searchLocalDocs", () => {
     expect(res.map((e) => e.name)).toEqual(["webclaw"]);
   });
 
+  it("un SEUL terme suffit (4+ lettres) — le seuil exigeait 2 correspondances", () => {
+    const res = searchLocalDocs("webclaw");
+    expect(res.map((e) => e.name)).toEqual(["webclaw"]);
+  });
+
   it("ne retourne rien pour une requête de stopwords ou trop courte", () => {
     expect(searchLocalDocs("the and")).toEqual([]);
     expect(searchLocalDocs("a b")).toEqual([]);

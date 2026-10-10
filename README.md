@@ -75,6 +75,13 @@ l'image que GitHub Actions a construite, testée et publiée sur GHCR
    docker compose up -d
    ```
 
+   ⚠️ Configurer aussi le `.env` **du serveur** (fichier gitignoré, non livré avec
+   le dépôt — modèle dans `.env.example`) : au minimum `WEBCLAW_API_KEY` (sans
+   elle, `POST /search` ne renvoie plus rien côté web : les appels WebClaw
+   répondent 401 et le journal le trace) et, pour que les captures d'écran
+   fonctionnent sous Docker, `LIBRY_CHROMIUM_NO_SANDBOX=true` (voir
+   `docs/api.md` §Capture d'écran pour le compromis de sécurité).
+
 Tags disponibles (une seule ligne à changer dans `docker-compose.yml`) :
 
 | Tag | Ce qu'il suit | Quand l'utiliser |
@@ -123,8 +130,21 @@ inter-services).
 | `LIBRY_ADMIN_KEYS` | *(vide)* | Clés marquées administrateur. |
 | `LIBRY_UPDATE_CWDS` | *(vide)* | Liste blanche de chemins pour `POST /update`. |
 | `WEBCLAW_URL` | `http://localhost:3001` | URL de WebClaw (compose : `http://webclaw:3000`). |
-| `WEBCLAW_API_KEY` | *(vide)* | Clé WebClaw (secret, en-tête Bearer). |
+| `WEBCLAW_API_KEY` | *(vide)* | Clé WebClaw (secret, en-tête Bearer). **Requise pour la recherche web** : sans elle, `/v1/*` répond 401 et `/search` reste silencieusement vide côté web (le journal serveur l'indique). |
 | `LIBRY_TAVILY_API_KEY` | *(vide)* | Clé Tavily (secret, 2e étage de la cascade). |
+| `LIBRY_CHROMIUM_NO_SANDBOX` | `false` | `true` = Chromium lancé **sans sandbox**. Nécessaire sous Docker (seccomp par défaut interdit les namespaces du sandbox) — compromis détaillé dans `.env.example`. |
+
+## Dépannage
+
+Journal du service : `docker compose logs libry` (Libry ne renvoie au client que
+des messages génériques ; la cause réelle est **toujours** journalisée).
+
+| Symptôme | Cause réelle | Action |
+| --- | --- | --- |
+| `POST /search` → `{"results":[],"archived":false}` avec au journal `[web-search] ... (HTTP 401)` | `WEBCLAW_API_KEY` absente ou fausse dans le conteneur | renseigner la clé dans le `.env` du serveur, puis `docker compose up -d`. Vérifier avec `GET /api/librarian/providers` (`webclaw.apiKey` doit valoir `true`). |
+| `POST /screenshot` → `{"error":"Screenshot capture failed"}` en moins d'une seconde, journal `[screenshot] capture failed: Screenshot failed (...): No usable sandbox! ...` | sandbox Chromium impossible dans un conteneur Docker par défaut (seccomp refuse `unshare`/namespaces ; l'image n'embarque pas de helper SUID) | `LIBRY_CHROMIUM_NO_SANDBOX=true` **ou** décommenter `security_opt: seccomp=unconfined` dans `docker-compose.yml` (garde alors le sandbox interne de Chromium). |
+| `/search` vide web compris alors que la clé WebClaw est valide | WebClaw `/v1/search` répond 501 sans `SERPER_API_KEY` ; Tavily non configuré ; le repli DuckDuckGo, lui, fonctionne via `/v1/scrape` | aucun correctif Libry ; poser `SERPER_API_KEY` sur WebClaw (machine à part) ou une clé Tavily pour la recherche directe |
+| Une recherche **d'un seul mot** ne trouvait rien localement | seuil hérité exigeant ≥ 2 correspondances | corrigé (≥ 1 correspondance pour un terme unique) |
 
 ## Structure
 

@@ -68,6 +68,9 @@ Réponse : `{ "results": [ { "title", "url", "snippet", "content?", "origin" } ]
 
 1. **Bibliothèque locale** (`searchLocalDocs`) — si ≥ 1 document local correspond,
    on renvoie **uniquement** le local : **aucun appel réseau** n'est effectué.
+   Le seuil exige **1 correspondance** pour une requête à un seul terme
+   (4+ lettres) et ≥ 2 termes (ou 50 %) au-delà — une requête mono-mot comme
+   `docker` peut donc matcher le doc `docker`.
 2. **WebClaw `/v1/search`** — en self-hosted sans `SERPER_API_KEY`, l'endpoint
    répond **501** : Libry **détecte le 501 et bascule sans erreur**.
 3. **Tavily** — si une clé Tavily est configurée (`LIBRY_TAVILY_API_KEY` ou
@@ -84,7 +87,12 @@ Réponse : `{ "results": [ { "title", "url", "snippet", "content?", "origin" } ]
 - Le moteur est branché sur la bibliothèque via `setWebSearchProvider`
   (`src/web-search.ts`) : un miss local déclenche la cascade ci-dessus. Si tous
   les moteurs sont indisponibles, la route répond `200` avec `results: []`
-  (jamais d'exception).
+  (jamais d'exception). ⚠️ **Clé WebClaw absente/fausse** : chaque appel
+  `/v1/*` répond `401` — la cascade entière (search, Tavily absent, repli DDG
+  via `/v1/scrape`) tombe alors et `results` est vide ; le journal serveur le
+  trace (`[web-search] WebClaw search unavailable: WebClaw request failed
+  (HTTP 401)` puis `DuckDuckGo fallback failed: ... (HTTP 401)`). Vérifier
+  `GET /providers` → `webclaw.apiKey`.
 
 ### `GET /api/librarian/doc/:name?version=` — clé requise
 
@@ -196,7 +204,9 @@ Erreurs (messages stables) :
   + en-tête `Retry-After` (secondes) — concurrence (`LIBRY_SHOT_CONCURRENCY`,
   défaut 2) et file (`LIBRY_SHOT_QUEUE_MAX`, défaut 4) saturées.
 - `502` `{ "error": "Screenshot capture failed" }` — échec technique (dont
-  Chromium absent).
+  Chromium absent). La cause détaillée (exit/signal + fin de stderr Chromium) est
+  **journalisée** : `[screenshot] capture failed: Screenshot failed (exit=1,
+  signal=null): No usable sandbox! ...` (`docker compose logs libry`).
 - `504` `{ "error": "Screenshot capture timed out" }` — dépassement du timeout
   (le process Chromium est tué en SIGKILL).
 
@@ -204,6 +214,16 @@ Sécurité : la résolution DNS est **épinglée** sur l'IP validée
 (`--host-resolver-rules`, anti DNS-rebinding) ; `--no-sandbox` n'est PAS passé
 par défaut (utilisateur non-root), il n'est réactivé que par
 `LIBRY_CHROMIUM_NO_SANDBOX=true`.
+
+⚠️ **Sous Docker, le sandbox Chromium est inexploitable par défaut** : le
+profil seccomp de Docker refuse `unshare`/`clone(CLONE_NEW*)` aux processus
+sans `CAP_SYS_ADMIN` (EPERM), et l'image n'embarque pas de helper SUID
+(`chromium-sandbox`) → **toute capture échoue** en `502` avec au journal
+`[screenshot] capture failed: Screenshot failed (...): No usable sandbox! …`.
+Deux remèdes (vérifiés sur le serveur) : `LIBRY_CHROMIUM_NO_SANDBOX=true`
+(navigateur sans sandbox interne — compromis) **ou** `security_opt:
+[seccomp=unconfined]` dans `docker-compose.yml` (le sandbox interne de Chromium
+fonctionne alors à nouveau ; le filtre seccomp Docker du conteneur est retiré).
 
 ### `GET /api/librarian/shot/:id.png` — clé requise
 
@@ -272,10 +292,13 @@ un **timeout** (`504` au dépassement). Erreurs génériques :
 État des moteurs — **booléens seulement, aucun secret** :
 
 ```json
-{ "webclaw": { "configured": true, "reachable": true }, "tavily": { "configured": false }, "search": "webclaw" }
+{ "webclaw": { "configured": true, "apiKey": true, "reachable": true }, "tavily": { "configured": false }, "search": "webclaw" }
 ```
 
 - `webclaw.configured` : configuration **explicite** présente (env `WEBCLAW_*` ou fichier).
+- `webclaw.apiKey` : présence d'une clé WebClaw (booléen, **jamais la valeur**).
+  Si `false`, tous les appels `/v1/*` répondront 401 et la recherche web sera
+  muette : c'est le premier point à vérifier.
 - `webclaw.reachable` : sonde `GET /health` (booléen).
 - `search` : moteur sollicité par la cascade — `webclaw` si joignable, sinon
   `tavily` s'il est configuré, sinon `duckduckgo`.

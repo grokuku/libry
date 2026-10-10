@@ -54,6 +54,18 @@ services:
       LIBRY_SHOT_QUEUE_MAX: "${LIBRY_SHOT_QUEUE_MAX:-4}"
       LIBRY_SHOT_TTL_HOURS: "${LIBRY_SHOT_TTL_HOURS:-168}"
       LIBRY_SHOT_INLINE_HTML: "${LIBRY_SHOT_INLINE_HTML:-false}"
+      # ⚠️ Sandbox Chromium sous Docker : le profil seccomp par DÉFAUT de Docker
+      #    interdit au navigateur de créer ses namespaces (unshare/clone → EPERM)
+      #    sans CAP_SYS_ADMIN, et l'image ne fournit PAS de helper SUID
+      #    (chromium-sandbox) → toutes les captures échouent avec
+      #    « Screenshot capture failed » tant que l'une des deux options
+      #    ci-dessous n'est pas activée :
+      #      • simple : LIBRY_CHROMIUM_NO_SANDBOX=true dans le .env du serveur
+      #        (le navigateur tourne SANS son sandbox interne ; seule la
+      #        barrière du conteneur protège — compromis assumé, maison) ;
+      #      • recommandée : décommenter `security_opt: seccomp=unconfined`
+      #        plus bas — garde le sandbox interne de Chromium (les captures
+      #        marchent), retire le filtre seccomp Docker du conteneur.
       LIBRY_CHROMIUM_NO_SANDBOX: "${LIBRY_CHROMIUM_NO_SANDBOX:-false}"
       # WebClaw : service TIERS sur une autre machine du LAN — mapping hôte 3006.
       WEBCLAW_URL: "${WEBCLAW_URL:-http://10.10.0.6:3006}"
@@ -70,6 +82,11 @@ services:
       - /mnt/user/appdata-ssd/Libry/data:/app/data
     # Chromium headless : /dev/shm trop petit par défaut fait planter le rendu.
     shm_size: "512m"
+    # Décommenter pour GARDER le sandbox interne de Chromium (voir la note
+    # LIBRY_CHROMIUM_NO_SANDBOX plus haut) : enlève le filtre seccomp Docker
+    # du conteneur, sans toucher aux capacités.
+    # security_opt:
+    #   - "seccomp=unconfined"
     restart: unless-stopped
     networks:
       - dockercustom

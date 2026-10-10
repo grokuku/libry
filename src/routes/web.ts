@@ -26,6 +26,7 @@ import {
   webclawBatch,
   isWebclawReachable,
   isWebclawConfigured,
+  getWebclawConfig,
   WebclawUnreachableError,
 } from "../webclaw.js";
 import { getTavilyConfig } from "../tavily.js";
@@ -229,7 +230,10 @@ router.get("/providers", libryAuth, async (_req: Request, res: Response) => {
       : "duckduckgo";
 
   res.json({
-    webclaw: { configured: isWebclawConfigured(), reachable },
+    // `apiKey` : présence d'une clé WebClaw configurée (booléen — jamais la
+    // valeur). Sans clé, tout appel /v1/* répond 401 : la recherche web est
+    // alors silencieusement vide (le journal serveur le détaille).
+    webclaw: { configured: isWebclawConfigured(), apiKey: Boolean(getWebclawConfig().apiKey), reachable },
     tavily: { configured: tavilyConfigured },
     search,
   });

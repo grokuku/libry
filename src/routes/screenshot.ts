@@ -119,6 +119,7 @@ router.post("/screenshot", libryAuth, async (req: Request, res: Response) => {
     }
 
     if (!detectChromium()) {
+      console.error("[screenshot] Chromium binary not found");
       return res.status(502).json({ error: "Chromium is not available" });
     }
 
@@ -156,12 +157,17 @@ router.post("/screenshot", libryAuth, async (req: Request, res: Response) => {
       origin: "web",
     });
   } catch (e) {
+    // Le client ne reçoit qu'un message générique (par conception) : la cause
+    // détaillée (exit/signal + fin de stderr de Chromium) part dans les logs.
     if (e instanceof ChromiumNotFoundError) {
+      console.error("[screenshot] Chromium binary not found");
       return res.status(502).json({ error: "Chromium is not available" });
     }
     if (e instanceof ScreenshotError && e.timedOut) {
+      console.error("[screenshot] capture timed out");
       return res.status(504).json({ error: "Screenshot capture timed out" });
     }
+    console.error("[screenshot] capture failed:", e instanceof Error ? e.message : e);
     return res.status(502).json({ error: "Screenshot capture failed" });
   } finally {
     shotQueue.release(slotKey);

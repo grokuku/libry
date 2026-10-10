@@ -210,8 +210,11 @@ export function searchLocalDocs(query: string): DocEntry[] {
       return { entry, score: matchCount };
     })
     .filter((item) => {
-      // Au moins 2 termes doivent matcher, OU au moins 50 % des termes
-      const minMatches = Math.max(2, Math.ceil(terms.length * 0.5));
+      // Un SEUL terme exploitable (ex. « docker ») : exiger 2 correspondances
+      // rendait la recherche locale structurellement vide (score max = 1) →
+      // seuil ramené à 1 dans ce cas. Au-delà, au moins 2 termes, OU au moins
+      // 50 % des termes.
+      const minMatches = terms.length === 1 ? 1 : Math.max(2, Math.ceil(terms.length * 0.5));
       return item.score >= minMatches;
     })
     .sort((a, b) => b.score - a.score);

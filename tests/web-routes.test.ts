@@ -211,7 +211,7 @@ describe("GET /api/librarian/providers", () => {
     const res = await request(env.app).get("/api/librarian/providers").set("X-API-Key", apiKey);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      webclaw: { configured: false, reachable: false },
+      webclaw: { configured: false, apiKey: false, reachable: false },
       tavily: { configured: false },
       search: "duckduckgo",
     });
@@ -228,7 +228,7 @@ describe("GET /api/librarian/providers", () => {
     const res = await request(env.app).get("/api/librarian/providers").set("X-API-Key", apiKey);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      webclaw: { configured: true, reachable: true },
+      webclaw: { configured: true, apiKey: true, reachable: true },
       tavily: { configured: true },
       search: "webclaw",
     });

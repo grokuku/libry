@@ -48,6 +48,13 @@ describe("runWithTimeout — jamais d'orphelin", () => {
     const r = await runWithTimeout("sleep", ["0"], 5_000);
     expect(r.timedOut).toBe(false);
     expect(r.code).toBe(0);
+    expect(r.stderr).toBe("");
+  });
+
+  it("conserve la fin de stderr (diagnostic des échecs de lancement)", async () => {
+    const r = await runWithTimeout("sh", ["-c", "printf 'ligne 1\\nERREUR FATALE\\n' >&2; exit 3"], 5_000);
+    expect(r.code).toBe(3);
+    expect(r.stderr).toContain("ERREUR FATALE");
   });
 });
 

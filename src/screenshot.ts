@@ -55,6 +55,25 @@ export class ScreenshotError extends Error {
   }
 }
 
+/** Borne de la fin de stderr conservée pour le diagnostic (jamais exposée au client). */
+const MAX_STDERR_CHARS = 2_000;
+const MAX_ERROR_DETAIL_CHARS = 300;
+
+/**
+ * Extrait la ligne la plus utile de stderr (dernière FATAL/ERROR, sinon la
+ * dernière ligne non vide). Sert au message de `ScreenshotError` — donc aux
+ * logs serveur (ex. « No usable sandbox! » de Chromium) — jamais au client.
+ */
+function chromiumErrorDetail(stderr: string): string {
+  const lines = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "";
+  const interesting = [...lines].reverse().find((line) => line.includes("ERROR") || line.includes("FATAL"));
+  return (interesting ?? lines[lines.length - 1]).slice(0, MAX_ERROR_DETAIL_CHARS);
+}
+
 /**
  * Retourne le chemin du binaire Chromium, ou null si introuvable.
  * Priorité : env CHROMIUM_PATH, puis `which` sur les candidats usuels.
@@ -80,16 +99,24 @@ export interface RunResult {
   code: number | null;
   signal: string | null;
   timedOut: boolean;
+  /** Fin de stderr (bornée à MAX_STDERR_CHARS) — vide si rien n'a été écrit. */
+  stderr: string;
 }
 
 /**
  * Lance une commande avec un timeout. Au dépassement, le process est tué
- * (SIGKILL) pour ne jamais laisser un Chromium orphelin.
+ * (SIGKILL) pour ne jamais laisser un Chromium orphelin. La fin de stderr est
+ * conservée (borne mémoire) : les erreurs fatales de Chromium arrivent en
+ * dernier et sont la seule trace exploitable quand la capture échoue.
  */
 export function runWithTimeout(cmd: string, args: string[], timeoutMs: number): Promise<RunResult> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: "ignore" });
+    const child = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
     let timedOut = false;
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString("utf8")).slice(-MAX_STDERR_CHARS);
+    });
     const timer = setTimeout(() => {
       timedOut = true;
       try {
@@ -100,11 +127,11 @@ export function runWithTimeout(cmd: string, args: string[], timeoutMs: number): 
     }, timeoutMs);
     child.on("error", () => {
       clearTimeout(timer);
-      resolve({ code: -1, signal: null, timedOut });
+      resolve({ code: -1, signal: null, timedOut, stderr });
     });
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
-      resolve({ code, signal, timedOut });
+      resolve({ code, signal, timedOut, stderr });
     });
   });
 }
@@ -178,7 +205,11 @@ export async function captureScreenshot(opts: CaptureOptions): Promise<CaptureRe
       const r2 = await runWithTimeout(bin, ["--headless", ...baseArgs, opts.url], timeoutMs);
       if (r2.timedOut) throw new ScreenshotError("Screenshot timed out", true);
       if (!(r2.code === 0 && existsSync(outPath))) {
-        throw new ScreenshotError(`Screenshot failed (exit=${r2.code}, signal=${r2.signal})`, false);
+        const detail = chromiumErrorDetail(r2.stderr);
+        throw new ScreenshotError(
+          `Screenshot failed (exit=${r2.code}, signal=${r2.signal})${detail ? `: ${detail}` : ""}`,
+          false,
+        );
       }
     }
 
