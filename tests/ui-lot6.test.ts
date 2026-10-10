@@ -104,6 +104,111 @@ describe("Lot 6 — câblage de app.js", () => {
     // Secret affiché une seule fois.
     expect(js).toContain("showSecret");
     expect(js).toContain("clipboard");
+    // Copie honnête : repli hors contexte sécurisé (execCommand) + sélection.
+    expect(js).toContain("execCommand");
+    expect(js).toContain("copyText");
+    expect(js).toContain("selectText");
+    // Le succès n'est annoncé qu'après vérification du booléen de copie.
+    expect(js).toMatch(/const ok = await copyText\(/);
+  });
+});
+
+describe("Lot 6 — copie de la clé (repli hors contexte sécurisé)", () => {
+  /** Stub de `document` minimal pour `legacyCopy` (textarea temporaire). */
+  function makeDoc(exec) {
+    const calls = { exec: 0, removed: 0 };
+    const area = {
+      value: "",
+      style: {},
+      setAttribute() {},
+      select() {},
+      setSelectionRange() {},
+      remove() {
+        calls.removed += 1;
+      },
+    };
+    const doc = {
+      createElement: () => area,
+      body: { append() {} },
+      execCommand: () => {
+        calls.exec += 1;
+        if (exec === "throw") throw new Error("interdit");
+        return exec;
+      },
+    };
+    return { doc, calls };
+  }
+
+  /** Extrait `legacyCopy` + `copyText` du app.js servi et les rend exécutables. */
+  async function loadCopyFns() {
+    const res = await request(env.app).get("/app.js");
+    const src = res.text;
+    const start = src.indexOf("function legacyCopy");
+    const end = src.indexOf("/** Affiche une boîte");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const body = src.slice(start, end);
+    return new Function(
+      "document",
+      "navigator",
+      `${body}\nreturn { legacyCopy, copyText };`,
+    );
+  }
+
+  it("utilise navigator.clipboard quand il existe (pas de repli)", async () => {
+    const { doc, calls } = makeDoc(true);
+    const factory = await loadCopyFns();
+    let written: string | null = null;
+    const fns = factory(doc, {
+      clipboard: {
+        writeText: async (v: string) => {
+          written = v;
+        },
+      },
+    });
+    const ok = await fns.copyText("secret-123");
+    expect(ok).toBe(true);
+    expect(written).toBe("secret-123");
+    expect(calls.exec).toBe(0);
+  });
+
+  it("sans navigator.clipboard : repli execCommand (cas HTTP sur IP de LAN)", async () => {
+    const { doc, calls } = makeDoc(true);
+    const factory = await loadCopyFns();
+    const fns = factory(doc, {});
+    const ok = await fns.copyText("secret-abc");
+    expect(ok).toBe(true);
+    expect(calls.exec).toBe(1);
+    expect(calls.removed).toBe(1);
+  });
+
+  it("échec réel (execCommand false) : retourne false, jamais de faux succès", async () => {
+    const { doc } = makeDoc(false);
+    const factory = await loadCopyFns();
+    const fns = factory(doc, {});
+    expect(await fns.copyText("x")).toBe(false);
+  });
+
+  it("writeText qui échoue bascule sur le repli", async () => {
+    const { doc, calls } = makeDoc(true);
+    const factory = await loadCopyFns();
+    const fns = factory(doc, {
+      clipboard: {
+        writeText: async () => {
+          throw new Error("NotAllowedError");
+        },
+      },
+    });
+    const ok = await fns.copyText("x");
+    expect(ok).toBe(true);
+    expect(calls.exec).toBe(1);
+  });
+
+  it("execCommand interdit : retourne false sans exception", async () => {
+    const { doc } = makeDoc("throw");
+    const factory = await loadCopyFns();
+    const fns = factory(doc, {});
+    expect(await fns.copyText("x")).toBe(false);
   });
 });
 

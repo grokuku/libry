@@ -217,6 +217,7 @@
     opts = opts || {};
     if (opts.class) node.className = opts.class;
     if (opts.text !== undefined) node.textContent = String(opts.text);
+    if (opts.value !== undefined) node.value = String(opts.value);
     if (opts.html !== undefined) node.innerHTML = opts.html;
     if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, v);
     if (opts.on) for (const [k, v] of Object.entries(opts.on)) node.addEventListener(k, v);
@@ -266,13 +267,14 @@
     return DATE_FMT.format(date);
   }
 
-  function notify(message, type) {
+  function notify(message, type, opts) {
     if (toast) {
       try {
-        if (type === "error") toast.error(message);
-        else if (type === "warning") toast.warning(message);
-        else if (type === "info") toast.info(message);
-        else toast.success(message);
+        const callOpts = opts || {};
+        if (type === "error") toast.error(message, callOpts);
+        else if (type === "warning") toast.warning(message, callOpts);
+        else if (type === "info") toast.info(message, callOpts);
+        else toast.success(message, callOpts);
         return;
       } catch {
         /* Brique indisponible : repli console ci-dessous. */
@@ -294,6 +296,73 @@
         .catch(() => false);
     }
     return Promise.resolve(window.confirm(`${title}\n\n${message}`));
+  }
+
+  /**
+   * Sélectionne tout le texte d'un champ ou d'un élément (best-effort :
+   * n'échoue jamais, l'utilisateur peut toujours sélectionner à la main).
+   */
+  function selectText(el) {
+    if (!el) return;
+    try {
+      if (typeof el.select === "function") {
+        el.select();
+      } else if (typeof window.getSelection === "function") {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      if (typeof el.focus === "function") el.focus();
+    } catch {
+      /* Sélection impossible : copie manuelle toujours possible. */
+    }
+  }
+
+  /**
+   * Repli historique de copie sur un <textarea> temporaire hors écran.
+   * Utilisé quand `navigator.clipboard` est indisponible — il n'existe QU'en
+   * contexte sécurisé (HTTPS ou localhost), jamais sur une IP de LAN en HTTP.
+   * Retourne `true` seulement si la copie a réellement réussi.
+   */
+  function legacyCopy(value) {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.setAttribute("aria-hidden", "true");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.left = "-1000px";
+    document.body.append(area);
+    let ok = false;
+    try {
+      area.select();
+      area.setSelectionRange(0, value.length);
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return !!ok;
+  }
+
+  /**
+   * Copie `text` dans le presse-papiers par tous les moyens disponibles.
+   * Retourne une promesse booléenne : `true` UNIQUEMENT si la copie a
+   * réellement réussi (retour honnête — jamais de faux succès).
+   */
+  async function copyText(text) {
+    const value = String(text == null ? "" : text);
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch {
+        /* Contexte non sécurisé / permission refusée : repli ci-dessous. */
+      }
+    }
+    return legacyCopy(value);
   }
 
   /** Affiche une boîte en lecture seule (repli `window.alert`). */
@@ -838,23 +907,45 @@
 
   /** Modale « secret affiché une seule fois » (copie + avertissement). */
   function showSecret(record) {
+    const value = record.key || "";
     const node = h("div", {});
     node.append(h("p", { text: `Clé « ${record.name || "sans nom"} » — copiez-la maintenant.` }));
     const box = h("div", { class: "secret-box" });
-    const code = h("code", { text: record.key || "" });
+    // Champ LECTURE SEULE toujours sélectionnable : un clic sélectionne toute
+    // la clé, pour pouvoir la copier à la main quelle que soit la situation.
+    const field = h("input", {
+      class: "secret-value",
+      value,
+      attrs: {
+        type: "text",
+        readonly: "",
+        spellcheck: "false",
+        autocapitalize: "off",
+        autocomplete: "off",
+        "aria-label": "Clé API",
+      },
+      on: { click: () => selectText(field), focus: () => selectText(field) },
+    });
     const copy = iconButton("copy", "Copier", {
       on: {
         click: async () => {
-          try {
-            await navigator.clipboard.writeText(record.key || "");
-            notify("Secret copié dans le presse-papiers.");
-          } catch {
-            notify("Copie automatique impossible — sélectionnez le texte à la main.", "error");
+          const ok = await copyText(value);
+          if (ok) {
+            notify("Clé copiée dans le presse-papiers.");
+            return;
           }
+          // Échec RÉEL : on ne prétend pas avoir copié. On sélectionne la clé
+          // et on l'annonce explicitement (message persistant).
+          selectText(field);
+          notify(
+            "Copie automatique impossible sur cette page (contexte non sécurisé). La clé est sélectionnée : copiez-la avec Ctrl+C (Cmd+C sur Mac).",
+            "error",
+            { duration: 0 },
+          );
         },
       },
     });
-    box.append(code, copy);
+    box.append(field, copy);
     node.append(box);
     node.append(
       h("p", {

@@ -842,7 +842,8 @@ code {
   margin: 10px 0;
 }
 
-.secret-box code {
+.secret-box code,
+.secret-box input.secret-value {
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
@@ -851,6 +852,18 @@ code {
   background: var(--libry-bg);
   white-space: nowrap;
   font-size: 13px;
+}
+
+.secret-box input.secret-value {
+  color: var(--libry-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  border-radius: 6px;
+  cursor: text;
+}
+
+.secret-box input.secret-value:focus {
+  outline: 2px solid var(--libry-accent);
+  outline-offset: 1px;
 }
 
 .warn-text {
