@@ -2,11 +2,11 @@
  * Bibliothèque de Libry — port de la partie stockage / recherche locale de
  * Pi-Web (backend/src/pi/librarian-service.ts).
  *
- * Le moteur web (WebClaw, Tavily) n'est PAS porté dans ce lot : la recherche
- * web est isolée derrière l'interface WebSearchProvider, à brancher dans un lot
- * ultérieur. Tant qu'aucun fournisseur n'est enregistré, POST /search renvoie
- * les résultats locaux, ou une liste vide sur un miss local — le contrat de
- * réponse reste inchangé.
+ * Le moteur web (WebClaw, Tavily) est isolé derrière l'interface
+ * WebSearchProvider, branchée par `src/web-search.ts` (`registerWebSearchProvider`).
+ * Tant qu'aucun fournisseur n'est enregistré, POST /search renvoie les résultats
+ * locaux, ou une liste vide sur un miss local — le contrat de réponse reste
+ * inchangé.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
@@ -52,6 +52,8 @@ export interface WebSearchResult {
   url: string;
   snippet: string;
   content?: string;
+  /** Origine du résultat : bibliothèque locale ou web (champ additif). */
+  origin?: "local" | "web";
 }
 
 /** Fournisseur de recherche web, branché dans un lot ultérieur (WebClaw/Tavily). */
@@ -227,7 +229,8 @@ export function getDocContent(name: string, version?: string): DocContent | null
 
 /**
  * Recherche locale puis web. L'archivage automatique reste désactivé
- * (`archived: false`), comme dans Pi-Web.
+ * (`archived: false`), comme dans Pi-Web. Chaque résultat porte son `origin`
+ * (`"local"` ou `"web"`) — champ additif, ignoré sans casse par les clients.
  */
 export async function searchAndArchive(query: string): Promise<{ results: WebSearchResult[]; archived: boolean }> {
   // 1. Chercher d'abord dans la bibliothèque locale
@@ -240,18 +243,19 @@ export async function searchAndArchive(query: string): Promise<{ results: WebSea
         url: entry.sourceUrl || "",
         snippet: content?.summary || entry.description,
         content: content ? formatDocAsText(content) : undefined,
+        origin: "local" as const,
       };
     });
     return { results: docs, archived: false };
   }
 
-  // 2. Sinon, recherche web via le fournisseur branché plus tard (WebClaw/Tavily).
+  // 2. Sinon, recherche web via le fournisseur branché (WebClaw/Tavily/DDG).
   //    Sans fournisseur enregistré, on renvoie une liste vide sans casser le contrat.
   const provider = getWebSearchProvider();
   if (!provider) return { results: [], archived: false };
 
   const webResults = await provider(query, 5);
-  return { results: webResults, archived: false };
+  return { results: webResults.map((r) => ({ ...r, origin: "web" as const })), archived: false };
 }
 
 /** Archive un document dans la bibliothèque. */

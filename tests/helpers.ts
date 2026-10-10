@@ -4,6 +4,8 @@ import { join } from "path";
 import type { Express } from "express";
 import { createApp } from "../src/index.js";
 import { resetAuthCaches } from "../src/libry-auth.js";
+import { setFetchForTests, type FetchLike } from "../src/utils/http.js";
+import { setScrapeDelayForTests } from "../src/web-search.js";
 
 export interface TestEnv {
   app: Express;
@@ -13,10 +15,62 @@ export interface TestEnv {
   cleanup: () => void;
 }
 
+/** Réponse JSON factice (helper de mock réseau). */
+export function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** Requête interceptée par le faux réseau. */
+export interface MockRequest {
+  url: string;
+  method: string;
+  body: any;
+  signal?: AbortSignal;
+}
+
+/**
+ * Installe un faux `fetch` piloté par un handler, enregistre les requêtes.
+ * `req.body` est le JSON désérialisé (null si absent/illisible).
+ */
+export function installMockFetch(
+  handler: (req: MockRequest) => Response | Promise<Response>,
+): { calls: MockRequest[] } {
+  const calls: MockRequest[] = [];
+  setFetchForTests(async (input, init) => {
+    let body: any = null;
+    try {
+      body = init?.body ? JSON.parse(String(init.body)) : null;
+    } catch {
+      body = null;
+    }
+    const req: MockRequest = {
+      url: input,
+      method: init?.method ?? "GET",
+      body,
+      signal: init?.signal ?? undefined,
+    };
+    calls.push(req);
+    return handler(req);
+  });
+  return { calls };
+}
+
+/**
+ * Faux `fetch` par défaut : AUCUN accès réseau. Toute requête échoue, ce qui
+ * simule un WebClaw injoignable — les tests qui ont besoin d'un comportement
+ * précis appellent `setFetchForTests(...)`.
+ */
+const unreachableFetch: FetchLike = async () => {
+  throw new TypeError("network disabled in tests");
+};
+
 /**
  * Prépare un environnement de test isolé : répertoire de données temporaire,
- * variables LIBRY_* nettoyées, caches d'auth réinitialisés. Retourne l'app
- * Express prête pour supertest.
+ * variables LIBRY_* nettoyées, caches d'auth réinitialisés, réseau coupé.
+ * Retourne l'app Express prête pour supertest.
  */
 export function makeTestEnv(overrides: Record<string, string> = {}): TestEnv {
   const dir = mkdtempSync(join(tmpdir(), "libry-test-"));
@@ -37,9 +91,17 @@ export function makeTestEnv(overrides: Record<string, string> = {}): TestEnv {
   delete process.env.LIBRY_SHOT_INLINE_HTML;
   delete process.env.LIBRY_CHROMIUM_NO_SANDBOX;
   delete process.env.CHROMIUM_PATH;
+  // Moteur web : configuration neutralisée + réseau coupé.
+  delete process.env.WEBCLAW_URL;
+  delete process.env.WEBCLAW_API_KEY;
+  delete process.env.LIBRY_TAVILY_API_KEY;
+  delete process.env.LIBRY_WEBCLAW_TIMEOUT_MS;
+  delete process.env.LIBRY_TAVILY_TIMEOUT_MS;
   for (const [k, v] of Object.entries(overrides)) process.env[k] = v;
 
   resetAuthCaches();
+  setFetchForTests(unreachableFetch);
+  setScrapeDelayForTests(0);
 
   return {
     app: createApp(),
@@ -47,6 +109,8 @@ export function makeTestEnv(overrides: Record<string, string> = {}): TestEnv {
     docsDir,
     keysFile,
     cleanup: () => {
+      setFetchForTests(null);
+      setScrapeDelayForTests(1000);
       rmSync(dir, { recursive: true, force: true });
     },
   };

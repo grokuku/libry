@@ -58,20 +58,33 @@ Renvoie l'index complet.
 
 Corps : `{ "query": "..." }`.
 
-Réponse : `{ "results": [ { "title", "url", "snippet", "content?" } ], "archived": false }`.
+Réponse : `{ "results": [ { "title", "url", "snippet", "content?", "origin" } ], "archived": false }`.
 
 - `400` si `query` absent : `{ "error": "Missing 'query' in body" }` (verbatim).
-- La recherche interroge **d'abord la bibliothèque locale**. Sur un miss local,
-  elle interroge le **web** et **peut renvoyer du contenu de page scrapé** dans
-  `content` (jusqu'à 5000 caractères par résultat).
+- `origin` (champ additif) : `"local"` pour un résultat de la bibliothèque,
+  `"web"` pour un résultat du web. Les clients qui l'ignorent ne cassent pas.
+
+**Cascade réelle** (identique à Pi-Web), dans cet ordre :
+
+1. **Bibliothèque locale** (`searchLocalDocs`) — si ≥ 1 document local correspond,
+   on renvoie **uniquement** le local : **aucun appel réseau** n'est effectué.
+2. **WebClaw `/v1/search`** — en self-hosted sans `SERPER_API_KEY`, l'endpoint
+   répond **501** : Libry **détecte le 501 et bascule sans erreur**.
+3. **Tavily** — si une clé Tavily est configurée (`LIBRY_TAVILY_API_KEY` ou
+   `$LIBRY_DATA_DIR/tavily-config.json`).
+4. **Repli DuckDuckGo** — la page HTML de résultats DDG est **scrapée via
+   WebClaw `/v1/scrape`**, puis les **3 premiers** résultats sont scrapés et
+   renvoyés avec `content` **≤ 5000 caractères**.
+
 - ⚠️ **Correction d'une erreur de la doc historique de Pi-Web**
   (`docs/librarian-api.md`) : celle-ci affirmait « pas de scraping en /search,
-  `content` absent ». C'est **faux** : le repli web (DuckDuckGo) scrape
-  réellement les pages et renvoie `content`. Le comportement réel est conservé
-  ici.
-- Dans ce lot, le moteur web n'est pas encore branché : un miss local renvoie
-  `{ "results": [], "archived": false }`. Le fournisseur web sera branché via
-  `setWebSearchProvider` dans un lot ultérieur, sans changer le contrat.
+  `content` absent ». **C'est FAUX.** Le repli DuckDuckGo **scrape réellement**
+  les pages et **renvoie `content`** (jusqu'à 5000 caractères par résultat). Le
+  comportement réel est conservé ici ; la doc décrit désormais ce qui se passe.
+- Le moteur est branché sur la bibliothèque via `setWebSearchProvider`
+  (`src/web-search.ts`) : un miss local déclenche la cascade ci-dessus. Si tous
+  les moteurs sont indisponibles, la route répond `200` avec `results: []`
+  (jamais d'exception).
 
 ### `GET /api/librarian/doc/:name?version=` — clé requise
 
@@ -200,3 +213,77 @@ si l'image est absente ou expirée (TTL `LIBRY_SHOT_TTL_HOURS`, défaut 168 h).
 Stockage : `LIBRY_SHOTS_DIR` (défaut `$LIBRY_DATA_DIR/shots`), `<uuid>.png` +
 `<uuid>.json`. Purge périodique locale, **sans LLM**. Pi-Web conserve
 l'affichage : il télécharge l'image et la réinjecte dans ses pièces jointes.
+
+## Moteur web (Lot 6)
+
+Routes sous `/api/librarian`, **clé requise**. Elles exposent les capacités de
+WebClaw (service tiers) **sans jamais divulguer son URL ni sa clé** : les
+erreurs renvoyées sont **génériques**, le détail reste dans les logs serveur.
+
+Configuration : `WEBCLAW_URL` (défaut `http://localhost:3001` ; en docker-compose
+`http://webclaw:3000`), `WEBCLAW_API_KEY` (secret), `LIBRY_TAVILY_API_KEY`
+(secret). Env **prioritaire**, repli fichier `$LIBRY_DATA_DIR/webclaw-config.json`
+et `$LIBRY_DATA_DIR/tavily-config.json`.
+
+### `POST /api/librarian/fetch` — clé requise
+
+Lecture d'une page (équivalent REST de `webclawScrape`).
+
+Corps : `{ "url": "https://…", "format?": "markdown" }`.
+
+Succès `200` :
+
+```json
+{ "url": "https://example.com/", "title": "…", "description": "…", "content": "…", "contentType": "text/html", "origin": "web" }
+```
+
+Erreurs (messages stables, sans URL/clé WebClaw) :
+
+- `400` `{ "error": "Missing 'url' in body" }` — cible absente.
+- `400` `{ "error": "Invalid URL" }` — URL malformée ou non http/https
+  (`file://` compris).
+- `403` `{ "error": "URL not allowed" }` — cible bloquée par la protection
+  **SSRF** (loopback, privée, lien-local/métadonnées cloud). Message volontairement
+  **non fuyant** (ni IP résolue, ni cause).
+- `502` `{ "error": "Fetch failed" }` — WebClaw injoignable ou réponse non-2xx.
+- `504` `{ "error": "Fetch timed out" }` — dépassement du timeout
+  (`LIBRY_WEBCLAW_TIMEOUT_MS`).
+
+### `POST /api/librarian/crawl|/map|/extract|/batch` — clé requise
+
+**Pass-through contrôlé** vers WebClaw (`/v1/crawl`, `/v1/map`, `/v1/extract`,
+`/v1/batch`). Toute URL cible passe la **validation SSRF** (sinon `403`/`400`),
+les réponses sont **bornées** (pages, URLs, taille du contenu) et chaque appel a
+un **timeout** (`504` au dépassement). Erreurs génériques :
+`502 { "error": "Upstream request failed" }` / `504 { "error": "Upstream request timed out" }`.
+
+- `POST /crawl` : corps `{ "url", "limit?", "maxDepth?" }` →
+  `{ "url", "origin": "web", "pages": [ { "url", "markdown?", "content?" } ], "count" }`.
+- `POST /map` : corps `{ "url" }` → `{ "url", "origin": "web", "count", "urls": [...] }`.
+- `POST /extract` : corps `{ "url", "schema?", "prompt?" }` — **exige `schema`
+  ou `prompt`** (contrainte WebClaw) ; sinon `400`
+  `{ "error": "extract requires 'schema' or 'prompt'" }` →
+  `{ "url", "origin": "web", "data": … }`.
+- `POST /batch` : corps `{ "urls": ["https://…"] }` (max 25 URLs) ; sinon `400`
+  `{ "error": "Missing 'urls' in body" }` → `{ "origin": "web", "results": … }`.
+
+### `GET /api/librarian/providers` — clé requise
+
+État des moteurs — **booléens seulement, aucun secret** :
+
+```json
+{ "webclaw": { "configured": true, "reachable": true }, "tavily": { "configured": false }, "search": "webclaw" }
+```
+
+- `webclaw.configured` : configuration **explicite** présente (env `WEBCLAW_*` ou fichier).
+- `webclaw.reachable` : sonde `GET /health` (booléen).
+- `search` : moteur sollicité par la cascade — `webclaw` si joignable, sinon
+  `tavily` s'il est configuré, sinon `duckduckgo`.
+
+### Note — capacités WebClaw (outil tiers, non modifiable)
+
+WebClaw (v0.6.23) expose `scrape`, `search`, `crawl`, `map`, `extract`,
+`summarize`, `batch`. `/v1/search` répond **501** tant que `SERPER_API_KEY`
+n'est pas fourni **côté WebClaw**. WebClaw **n'exécute pas le JavaScript** et
+n'expose **aucun endpoint de capture** (fonctions cloud volontairement fermées) :
+la capture d'écran reste assurée par Libry (Chromium, Lot 5).

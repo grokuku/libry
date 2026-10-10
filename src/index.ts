@@ -13,6 +13,8 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { getHost, getPort, getAllowedOrigins, getRateLimitPerMin } from "./config.js";
 import librarianRouter from "./routes/librarian.js";
 import screenshotRouter from "./routes/screenshot.js";
+import webRouter from "./routes/web.js";
+import { registerWebSearchProvider } from "./web-search.js";
 import { startShotPurgeTimer } from "./shot-store.js";
 
 /** Version du package, lue à côté du point d'entrée (src/ comme dist/). */
@@ -30,6 +32,11 @@ export function createApp(): express.Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "5mb" }));
+
+  // ── Moteur de recherche web (cascade WebClaw → Tavily → DuckDuckGo) ──
+  // Branché sur library-store via son point d'injection : POST /search interroge
+  // la bibliothèque locale d'abord, puis la cascade web sur un miss local.
+  registerWebSearchProvider();
 
   // ── CORS (sans dépendance : uniquement les origines déclarées) ──
   const allowedOrigins = getAllowedOrigins();
@@ -69,6 +76,9 @@ export function createApp(): express.Express {
 
   // ── Capture d'écran (même préfixe, clé requise, chemins distincts) ──
   app.use("/api/librarian", screenshotRouter);
+
+  // ── Moteur web (même préfixe, clé requise, chemins distincts) ──
+  app.use("/api/librarian", webRouter);
 
   return app;
 }

@@ -78,6 +78,23 @@ export function getLogLevel(): string {
   return readEnv("LIBRY_LOG_LEVEL", "info");
 }
 
+// ── Moteur web (Lot 6) ──
+
+/**
+ * Timeout par appel vers WebClaw (scrape/search/crawl/map/extract/batch), en ms.
+ * Au dépassement, l'appel est abandonné (AbortSignal) et mappé en 504.
+ */
+export function getWebclawTimeoutMs(): number {
+  const parsed = Number.parseInt(readEnv("LIBRY_WEBCLAW_TIMEOUT_MS", "15000"), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
+}
+
+/** Timeout par appel vers l'API Tavily, en ms (défaut 15 s). */
+export function getTavilyTimeoutMs(): number {
+  const parsed = Number.parseInt(readEnv("LIBRY_TAVILY_TIMEOUT_MS", "15000"), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
+}
+
 // ── Capture d'écran (Lot 5) ──
 
 /** Répertoire des captures (PNG + méta JSON). */
