@@ -77,12 +77,44 @@ describe("transport de la clé (Bearer / X-API-Key / les deux)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("les deux en-têtes (Bearer prioritaire)", async () => {
+  it("Bearer valide + X-API-Key invalide → 200 (au moins une clé valide suffit)", async () => {
     const res = await request(env.app)
       .get("/api/librarian/library")
       .set("Authorization", `Bearer ${key}`)
       .set("X-API-Key", "invalide");
     expect(res.status).toBe(200);
+  });
+
+  it("scénario Yuki : Bearer pia_inconnu + X-API-Key valide → 200", async () => {
+    // Yuki envoie son jeton Pi-Web (`pia_…`, inconnu de Libry) EN PLUS de sa clé :
+    // le Bearer invalide ne doit PAS bloquer la X-API-Key valide (contrat « OU »).
+    const res = await request(env.app)
+      .get("/api/librarian/library")
+      .set("Authorization", "Bearer pia_inconnu")
+      .set("X-API-Key", key);
+    expect(res.status).toBe(200);
+  });
+
+  it("Bearer pia_inconnu seul → 401 verbatim (pas d'affaiblissement)", async () => {
+    const res = await request(env.app)
+      .get("/api/librarian/library")
+      .set("Authorization", "Bearer pia_inconnu");
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "Invalid or missing API key" });
+  });
+
+  it("les deux en-têtes valides → 200", async () => {
+    const res = await request(env.app)
+      .get("/api/librarian/library")
+      .set("Authorization", `Bearer ${key}`)
+      .set("X-API-Key", key);
+    expect(res.status).toBe(200);
+  });
+
+  it("aucun en-tête → 401 verbatim", async () => {
+    const res = await request(env.app).get("/api/librarian/library");
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "Invalid or missing API key" });
   });
 
   it("clé invalide → 401 verbatim", async () => {

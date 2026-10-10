@@ -23,15 +23,15 @@
  * lire et changer le mot de passe restent permis.
  */
 import { type Request, type Response, type NextFunction } from "express";
-import { extractApiKey, validateKey, isAdminKey } from "../libry-auth.js";
+import { extractApiKeys, validateKey, isAdminKey } from "../libry-auth.js";
 import { isTrustedLocalRequest } from "../utils/request-identity.js";
 import { getSessionFromRequest, hasSessionCookie, verifyCsrfToken, isPasswordDefault } from "../session-store.js";
 
 /** Vrai si la requête est autorisée comme administrateur (local, clé admin ou session). */
 export function isAdminRequest(req: Request): boolean {
   if (isTrustedLocalRequest(req)) return true;
-  const provided = extractApiKey(req);
-  if (provided && validateKey(provided) && isAdminKey(provided)) return true;
+  const provided = extractApiKeys(req);
+  if (provided.some((key) => validateKey(key) && isAdminKey(key))) return true;
   return getSessionFromRequest(req) !== null;
 }
 

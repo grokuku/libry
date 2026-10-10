@@ -8,7 +8,7 @@
  * key"}`. `GET /status` est publique car montée avant ce middleware.
  */
 import { type Request, type Response, type NextFunction } from "express";
-import { extractApiKey, validateKey } from "../libry-auth.js";
+import { extractApiKeys, validateKey } from "../libry-auth.js";
 import { getSessionFromRequest } from "../session-store.js";
 
 export function libryAuth(req: Request, res: Response, next: NextFunction): void {
@@ -16,8 +16,8 @@ export function libryAuth(req: Request, res: Response, next: NextFunction): void
     next();
     return;
   }
-  const provided = extractApiKey(req);
-  if (!provided || !validateKey(provided)) {
+  const provided = extractApiKeys(req);
+  if (!provided.some((key) => validateKey(key))) {
     res.status(401).json({ error: "Invalid or missing API key" });
     return;
   }

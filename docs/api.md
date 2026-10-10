@@ -11,7 +11,10 @@ Base par défaut : `http://<hôte>:3007`.
 - Toutes les autres routes : clé obligatoire, fournie indifféremment par
   - `Authorization: Bearer <clé>`, ou
   - `X-API-Key: <clé>`.
-- Clé absente ou invalide → `401` `{ "error": "Invalid or missing API key" }`.
+- Les deux en-têtes peuvent coexister : il suffit qu'**au moins une** des deux
+  valeurs soit une clé valide. Un `Bearer` inconnu (ex. le jeton `pia_…` de
+  Pi-Web envoyé en plus) ne bloque **pas** une `X-API-Key` valide.
+- Clé absente ou invalide (aucune des deux valide) → `401` `{ "error": "Invalid or missing API key" }`.
 - Nouvelles clés : `libry_` + 32 caractères hexadécimaux. Les clés historiques
   `lib-…` restent valides.
 

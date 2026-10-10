@@ -17,7 +17,8 @@ Prêt dans ce lot :
 - Socle serveur Express, CORS par liste blanche, limitation de débit, `GET /health`.
 - Contrat `/api/librarian/*` repris au caractère près (codes + messages d'erreur).
 - Authentification à une seule couche : `Authorization: Bearer <clé>` **ou**
-  `X-API-Key: <clé>`. `GET /api/librarian/status` est publique.
+  `X-API-Key: <clé>` — au moins une des deux valide suffit (un `Bearer` inconnu
+  ne bloque pas une `X-API-Key` valide). `GET /api/librarian/status` est publique.
 - Gestion des clés (`/api/librarian/keys`) réservée à la boucle locale ou à une
   clé marquée administrateur. Nouvelles clés `libry_…`, **clés historiques
   `lib-…` toujours valides**.

@@ -308,17 +308,30 @@ export function regenerateKey(id: string): (LibryKey & { key: string }) | null {
 // ── Extraction de clé présentée ──
 
 /**
- * Extrait la clé d'une requête : en-tête `Authorization: Bearer <clé>` OU
- * `X-API-Key: <clé>`. Retourne null si aucune clé exploitable n'est présente.
+ * Extrait TOUTES les clés candidates présentées par une requête, dans l'ordre :
+ * `Authorization: Bearer <clé>` puis `X-API-Key: <clé>`. Respecte le contrat
+ * « OU » : l'appelant doit accepter la requête dès qu'AU MOINS UNE candidate est
+ * valide (un Bearer inconnu — ex. le jeton `pia_…` que Yuki envoie en plus de sa
+ * clé — ne doit PAS bloquer une `X-API-Key` valide).
+ *
+ * Les valeurs vides (ou un `Authorization` non « Bearer ») sont ignorées, et les
+ * doublons exacts sont dédupliqués. Retourne `[]` si aucune clé exploitable.
  */
-export function extractApiKey(req: Request): string | null {
+export function extractApiKeys(req: Request): string[] {
+  const candidates: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (trimmed && !candidates.includes(trimmed)) candidates.push(trimmed);
+  };
+
   const authorization = req.headers["authorization"];
   if (typeof authorization === "string") {
     const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
-    if (match && match[1].trim()) return match[1].trim();
+    if (match) push(match[1]);
   }
-  const apiKey = req.headers["x-api-key"];
-  if (typeof apiKey === "string" && apiKey.trim()) return apiKey.trim();
-  return null;
+
+  push(req.headers["x-api-key"]);
+  return candidates;
 }
 
