@@ -1,16 +1,23 @@
 /**
- * Configuration de Libry — lecture PARESSEUSE des variables d'environnement.
+ * Configuration de Libry — lecture PARESSEUSE et À CHAUD des réglages.
  *
- * Les getters relisent l'environnement à chaque appel : les tests peuvent donc
+ * Les getters relisent l'environnement à chaque appel (et consultent le fichier
+ * de réglages `$LIBRY_DATA_DIR/config.json` en repli) : les tests peuvent donc
  * isoler chaque suite dans un répertoire de données temporaire sans recharger
- * les modules. Les variables propres à Libry sont préfixées LIBRY_* ;
- * CHROMIUM_PATH et WEBCLAW_* restent neutres (contrat inter-services).
+ * les modules, et une valeur écrite via l'API d'administration est prise en
+ * compte SANS redémarrage. Modèle de résolution : `env ?? fichier ?? défaut`.
+ * Les variables propres à Libry sont préfixées LIBRY_* ; CHROMIUM_PATH et
+ * WEBCLAW_* restent neutres (contrat inter-services).
+ *
+ * ⚠️ Réglages « redémarrage requis » (lus UNE fois au démarrage, hors getters) :
+ * LIBRY_HOST, LIBRY_PORT, LIBRY_ALLOWED_ORIGINS, LIBRY_RATE_LIMIT_PER_MIN et
+ * LIBRY_DATA_DIR. Tous les autres sont appliqués à chaud.
  */
 import path from "path";
+import { resolveSetting } from "./settings-store.js";
 
 function readEnv(name: string, fallback: string): string {
-  const raw = process.env[name];
-  return raw !== undefined && raw.trim() !== "" ? raw.trim() : fallback;
+  return resolveSetting(name, fallback);
 }
 
 export function getHost(): string {
@@ -22,7 +29,7 @@ export function getPort(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 3007;
 }
 
-/** Répertoire racine des données persistantes (volume). */
+/** Répertoire racine des données persistantes (volume) — envOnly, redémarrage requis. */
 export function getDataDir(): string {
   return path.resolve(readEnv("LIBRY_DATA_DIR", "/app/data"));
 }
@@ -37,7 +44,7 @@ export function getKeysFile(): string {
   return path.resolve(readEnv("LIBRY_KEYS_FILE", path.join(getDataDir(), "libry-keys.json")));
 }
 
-/** Origines CORS autorisées (liste). Vide = aucune origine cross-origin. */
+/** Origines CORS autorisées (liste). Vide = aucune origine cross-origin. Redémarrage requis. */
 export function getAllowedOrigins(): string[] {
   return readEnv("LIBRY_ALLOWED_ORIGINS", "")
     .split(",")
@@ -45,6 +52,7 @@ export function getAllowedOrigins(): string[] {
     .filter(Boolean);
 }
 
+/** Limite de requêtes par minute (redémarrage requis : capturée au montage). */
 export function getRateLimitPerMin(): number {
   const parsed = Number.parseInt(readEnv("LIBRY_RATE_LIMIT_PER_MIN", "600"), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 600;
@@ -130,8 +138,8 @@ export function getShotInlineHtml(): boolean {
 
 /** Chemin explicite du binaire Chromium (sinon détection par `which`). */
 export function getChromiumPath(): string | undefined {
-  const raw = process.env.CHROMIUM_PATH;
-  return raw !== undefined && raw.trim() !== "" ? raw.trim() : undefined;
+  const raw = readEnv("CHROMIUM_PATH", "");
+  return raw !== "" ? raw : undefined;
 }
 
 /**

@@ -12,7 +12,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:vendor": "node scripts/check-holaf-vendor.mjs"
   },
   "dependencies": {
     "express": "^4.21.0",

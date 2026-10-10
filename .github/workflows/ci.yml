@@ -77,6 +77,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Garde-fou vendor holaf : le CLI qui copie les briques vit dans
+      # holaf-lib et n'existe PAS sur GitHub — ce script (Node pur, hors
+      # réseau) vérifie que les .js de public/vendor/holaf/ correspondent aux
+      # empreintes pinnées (holaf-checksums.json + holaf-manifest.json).
+      - name: Garde-fou vendor holaf
+        run: npm run check:vendor
+
       # Les tests de capture réelle ont besoin d'un binaire navigateur.
       # « Chrome for Testing » parle les mêmes drapeaux que Chromium
       # (`--headless=new`, `--screenshot`, `--host-resolver-rules`) et n'est

@@ -1,0 +1,883 @@
+/* Libry — habillage du socle statique.
+   DOCTRINE « ALIAS + REPLI » (comme Pi-Web) : les variables locales sont des
+   ALIAS des jetons --holaf-* posés au runtime par la brique `tokens` (seule
+   autorisée à écrire sur :root). Le 2e argument de var() est le REPLI
+   historique : sans la brique (JS indisponible), le rendu reste lisible.
+   Les transparences passent par color-mix() : AUCUN triplet RGB calculé en JS
+   (aucune écoute de `holaf-tokens-changed` nécessaire). */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, bordures, textes, accent, danger ← jetons holaf. */
+  --libry-bg: var(--holaf-surface, #0b0e14);
+  --libry-bg-raised: var(--holaf-surface-raised, #131826);
+  --libry-bg-hover: var(--holaf-surface-hover, #1a2133);
+  --libry-border: var(--holaf-border, #26304a);
+  --libry-text: var(--holaf-text, #e6eaf2);
+  --libry-text-muted: var(--holaf-text-muted, #93a0b8);
+  --libry-accent: var(--holaf-accent, #5aa9ff);
+  --libry-danger: var(--holaf-danger, #ff6b6b);
+  --libry-radius: var(--holaf-radius, 10px);
+
+  /* Fond accentué translucide : repli rgba() puis color-mix() (1re couleur
+     dérivée de l'accent courant, toutes familles confondues). */
+  --libry-accent-soft: rgba(90, 169, 255, 0.14);
+  --libry-accent-soft: color-mix(in srgb, var(--libry-accent) 14%, transparent);
+
+  --libry-gap: 16px;
+}
+
+/* Le mode clair du thème (preset <famille>-light) pilote le color-scheme des
+   contrôles natifs — même source que les icônes clair/sombre. */
+html[data-theme$="-light"] {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--libry-bg);
+  color: var(--libry-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ── En-tête ─────────────────────────────────────────────────────────── */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--libry-gap);
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--libry-border);
+  background: var(--libry-bg-raised);
+}
+
+/* ── Sélecteur de thème ──────────────────────────────────────────────── */
+
+.theme-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.theme-control select {
+  appearance: none;
+  padding: 7px 12px;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 3px);
+  background: var(--libry-bg);
+  color: var(--libry-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.theme-control select:focus-visible,
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--libry-accent);
+  outline-offset: 1px;
+}
+
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 3px);
+  background: var(--libry-bg);
+  color: var(--libry-text-muted);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  background: var(--libry-bg-hover);
+  color: var(--libry-text);
+}
+
+.theme-toggle .icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Une seule icône visible selon le mode : soleil en clair, lune en sombre. */
+.theme-toggle .icon--sun {
+  display: none;
+}
+
+html[data-theme$="-light"] .theme-toggle .icon--sun {
+  display: block;
+}
+
+html[data-theme$="-light"] .theme-toggle .icon--moon {
+  display: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--libry-radius);
+  background: var(--libry-accent-soft);
+  border: 1px solid var(--libry-border);
+  color: var(--libry-accent);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.brand-text h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.brand-text p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--libry-text-muted);
+}
+
+/* ── Onglets ─────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--libry-border);
+  border-radius: var(--libry-radius);
+  background: var(--libry-bg);
+}
+
+.tab {
+  appearance: none;
+  border: 0;
+  border-radius: calc(var(--libry-radius) - 3px);
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--libry-text-muted);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--libry-bg-hover);
+  color: var(--libry-text);
+}
+
+.tab.is-active {
+  background: var(--libry-accent-soft);
+  color: var(--libry-accent);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--libry-accent);
+  outline-offset: 1px;
+}
+
+/* ── Contenu ─────────────────────────────────────────────────────────── */
+
+.content {
+  flex: 1;
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 22px;
+}
+
+.panel-head {
+  margin-bottom: 14px;
+}
+
+.panel-head h2 {
+  margin: 0 0 2px;
+  font-size: 20px;
+}
+
+.panel-hint {
+  margin: 0;
+  color: var(--libry-text-muted);
+  font-size: 13px;
+}
+
+.placeholder {
+  border: 1px dashed var(--libry-border);
+  border-radius: var(--libry-radius);
+  background: var(--libry-bg-raised);
+  padding: 28px 22px;
+  color: var(--libry-text-muted);
+}
+
+.placeholder p {
+  margin: 0 0 8px;
+}
+
+.placeholder p:last-child {
+  margin-bottom: 0;
+}
+
+.muted {
+  color: var(--libry-text-muted);
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+/* ── Pied de page ────────────────────────────────────────────────────── */
+
+.footer {
+  padding: 12px 22px;
+  border-top: 1px solid var(--libry-border);
+  color: var(--libry-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ── Éléments d'interface communs (Lot 6) ────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 3px);
+  background: var(--libry-bg-raised);
+  color: var(--libry-text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--libry-bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible,
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible,
+.checkbox input:focus-visible {
+  outline: 2px solid var(--libry-accent);
+  outline-offset: 1px;
+}
+
+.btn--accent {
+  border-color: transparent;
+  background: var(--libry-accent-soft);
+  color: var(--libry-accent);
+}
+
+.btn--accent:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--libry-accent) 22%, transparent);
+}
+
+.btn--ghost {
+  background: transparent;
+}
+
+.btn--danger {
+  color: var(--libry-danger);
+}
+
+.btn .icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.btn .icon svg,
+.icon-btn .icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 4px);
+  background: transparent;
+  color: var(--libry-text-muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--libry-bg-hover);
+  color: var(--libry-text);
+}
+
+.icon-btn--danger:hover:not(:disabled) {
+  color: var(--libry-danger);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.icon-btn .icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+}
+
+table .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field--grow {
+  flex: 1;
+}
+
+.field label {
+  font-size: 13px;
+  color: var(--libry-text-muted);
+}
+
+.field input[type="text"],
+.field input[type="search"],
+.field input[type="password"],
+.field input[type="number"],
+.field select {
+  padding: 7px 10px;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 4px);
+  background: var(--libry-bg);
+  color: var(--libry-text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.field input:disabled {
+  color: var(--libry-text-muted);
+  background: var(--libry-bg-raised);
+  cursor: not-allowed;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--libry-text);
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.form-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--libry-border);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--libry-border);
+  background: var(--libry-bg-hover);
+  color: var(--libry-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.badge--ok {
+  color: var(--libry-accent);
+  border-color: color-mix(in srgb, var(--libry-accent) 40%, transparent);
+}
+
+.badge--env {
+  color: var(--libry-accent);
+}
+
+.badge--warn {
+  color: var(--libry-danger);
+  border-color: color-mix(in srgb, var(--libry-danger) 40%, transparent);
+}
+
+.badge--admin {
+  color: var(--libry-accent);
+}
+
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--libry-bg-hover);
+  font-size: 0.9em;
+}
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: var(--libry-gap);
+  padding: 12px 16px;
+  border: 1px solid var(--libry-border);
+  border-radius: var(--libry-radius);
+  font-size: 14px;
+}
+
+.banner--danger {
+  border-color: color-mix(in srgb, var(--libry-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--libry-danger) 12%, transparent);
+  color: var(--libry-text);
+}
+
+.banner--danger strong {
+  color: var(--libry-danger);
+}
+
+.card {
+  margin-bottom: var(--libry-gap);
+  padding: 18px;
+  border: 1px solid var(--libry-border);
+  border-radius: var(--libry-radius);
+  background: var(--libry-bg-raised);
+}
+
+.card-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.card > .card-title + .muted {
+  margin-top: 0;
+}
+
+.session-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 4px;
+}
+
+.disclosure {
+  margin-top: 12px;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 3px);
+  padding: 10px 14px;
+}
+
+.disclosure summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.empty {
+  margin: 0;
+  padding: 20px 12px;
+  color: var(--libry-text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* ── Onglet Documentation : filtre + liste + détail ──────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: var(--libry-gap);
+}
+
+.toolbar-status {
+  align-self: center;
+  margin-left: auto;
+  color: var(--libry-text-muted);
+  font-size: 13px;
+}
+
+.docs-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  gap: var(--libry-gap);
+  align-items: start;
+}
+
+.docs-list-wrap {
+  max-height: 68vh;
+  overflow: auto;
+  border: 1px solid var(--libry-border);
+  border-radius: var(--libry-radius);
+  background: var(--libry-bg-raised);
+}
+
+.docs-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+
+.docs-list li {
+  border-radius: calc(var(--libry-radius) - 4px);
+}
+
+.docs-list button {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.docs-list button:hover {
+  background: var(--libry-bg-hover);
+}
+
+.docs-list button.is-active {
+  background: var(--libry-accent-soft);
+}
+
+.docs-list .doc-name {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-weight: 500;
+}
+
+.docs-list .doc-version {
+  color: var(--libry-accent);
+  font-size: 12px;
+}
+
+.docs-list .doc-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--libry-text-muted);
+  font-size: 12px;
+}
+
+.docs-detail {
+  padding: 18px;
+  border: 1px solid var(--libry-border);
+  border-radius: var(--libry-radius);
+  background: var(--libry-bg-raised);
+  min-height: 120px;
+}
+
+.detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.detail-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.detail-section {
+  margin-top: 16px;
+}
+
+.detail-section h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--libry-text-muted);
+}
+
+.detail-section ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.detail-section li {
+  margin-bottom: 4px;
+}
+
+.detail-section pre {
+  margin: 0 0 10px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 4px);
+  background: var(--libry-bg);
+  font-size: 12.5px;
+}
+
+.detail-section pre:last-child {
+  margin-bottom: 0;
+}
+
+.doc-summary {
+  margin: 0;
+}
+
+/* ── Listes génériques (clés API) ─────────────────────────────────────── */
+
+.list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 3px);
+}
+
+.list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--libry-border);
+}
+
+.list li:last-child {
+  border-bottom: 0;
+}
+
+.list .list-main {
+  flex: 1;
+  min-width: 180px;
+}
+
+.list .list-name {
+  font-weight: 500;
+}
+
+.list .list-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  color: var(--libry-text-muted);
+  font-size: 12px;
+}
+
+.list .list-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Grille des paramètres ────────────────────────────────────────────── */
+
+.settings-group {
+  margin-bottom: 18px;
+}
+
+.settings-group h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--libry-text-muted);
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) 1.4fr;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid var(--libry-border);
+}
+
+.setting-row:first-of-type {
+  border-top: 0;
+}
+
+.setting-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.setting-label .name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.setting-help {
+  display: block;
+  margin-top: 4px;
+  color: var(--libry-text-muted);
+  font-size: 12px;
+}
+
+.setting-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.setting-control input[type="text"],
+.setting-control input[type="number"],
+.setting-control input[type="password"],
+.setting-control select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--libry-border);
+  border-radius: calc(var(--libry-radius) - 4px);
+  background: var(--libry-bg);
+  color: var(--libry-text);
+  font: inherit;
+  font-size: 14px;
+}
+
+/* ── Secret affiché une seule fois (modale) ───────────────────────────── */
+
+.secret-box {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.secret-box code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--libry-border);
+  background: var(--libry-bg);
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.warn-text {
+  margin: 6px 0 0;
+  color: var(--libry-danger);
+  font-size: 13px;
+}
+
+/* ── Adaptations petits écrans ───────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .theme-control {
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  .tabs {
+    justify-content: center;
+  }
+
+  .content {
+    padding: 16px;
+  }
+
+  .toolbar-status {
+    margin-left: 0;
+  }
+
+  .docs-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .docs-list-wrap {
+    max-height: 40vh;
+  }
+
+  .setting-row {
+    grid-template-columns: 1fr;
+  }
+}

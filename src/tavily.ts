@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
 import { getDataDir, getTavilyTimeoutMs } from "./config.js";
+import { resolveSetting } from "./settings-store.js";
 import { httpFetch } from "./utils/http.js";
 
 export interface TavilyConfig {
@@ -39,11 +40,13 @@ function readConfigFile(): Partial<TavilyConfig> {
   }
 }
 
-/** Config effective : env prioritaire, fichier en repli. */
+/**
+ * Clé effective : env `LIBRY_TAVILY_API_KEY` prioritaire, puis
+ * `$LIBRY_DATA_DIR/config.json`, puis le fichier historique `tavily-config.json`.
+ */
 export function getTavilyConfig(): TavilyConfig {
-  const file = readConfigFile();
-  const envKey = nonEmpty(process.env.LIBRY_TAVILY_API_KEY);
-  return { apiKey: envKey ?? nonEmpty(file.apiKey) ?? "" };
+  const legacy = readConfigFile();
+  return { apiKey: resolveSetting("LIBRY_TAVILY_API_KEY", nonEmpty(legacy.apiKey) ?? "") };
 }
 
 /** Persiste la config (compat Pi-Web) dans `$LIBRY_DATA_DIR/tavily-config.json`. */

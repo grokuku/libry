@@ -8,8 +8,8 @@
  * locaux, ou une liste vide sur un miss local — le contrat de réponse reste
  * inchangé.
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from "fs";
+import { join, dirname, resolve, sep } from "path";
 import { getDocsDir } from "./config.js";
 
 // ── Types ──
@@ -296,4 +296,86 @@ export function getLibraryStatus(): { totalDocs: number; lastUpdated: string; la
     lastUpdated: index.lastUpdated,
     lastScan: index.lastScan,
   };
+}
+
+/**
+ * Supprime un document : le fichier `tools/<nom>@<version>.json` ET l'entrée
+ * correspondante d'`index.json`. Le nom et la version sont nettoyés via
+ * `sanitizeDocPathComponent` (défense en profondeur) ; le chemin effectif est
+ * celui de l'index, TOUJOURS recadré sous `docs/`.
+ *
+ * `version` absente → toutes les versions portant ce nom sont supprimées.
+ * Retourne le nombre d'entrées retirées (0 si rien ne correspond).
+ */
+export function deleteDoc(name: string, version?: string): { deleted: number } {
+  const safeName = sanitizeDocPathComponent(name);
+  if (!safeName) return { deleted: 0 };
+  const safeVersion = version === undefined ? undefined : sanitizeDocPathComponent(version);
+  if (version !== undefined && !safeVersion) return { deleted: 0 };
+
+  const index = loadIndex();
+  const matches = (e: DocEntry): boolean =>
+    e.name === safeName && (safeVersion === undefined || e.version === safeVersion);
+  const removed = index.library.filter(matches);
+  if (removed.length === 0) return { deleted: 0 };
+
+  const docsRoot = resolve(getDocsDir());
+  for (const entry of removed) {
+    const fullPath = resolve(docsRoot, entry.filePath);
+    // Garde-fou : ne supprime QUE sous docs/ (index non fiable → jamais hors zone).
+    if (!fullPath.startsWith(docsRoot + sep)) continue;
+    if (existsSync(fullPath)) unlinkSync(fullPath);
+  }
+
+  index.library = index.library.filter((e) => !matches(e));
+  index.lastUpdated = new Date().toISOString();
+  saveIndex(index);
+  return { deleted: removed.length };
+}
+
+/**
+ * Reconstruit intégralement `index.json` en scannant `docs/tools/*.json`.
+ * Utile après un import manuel de documents. Les fichiers illisibles ou sans
+ * méta `name`/`version` exploitables sont ignorés ; les doublons `nom@version`
+ * sont dédupliqués (dernière occurrence gagnante).
+ */
+export function reindexLibrary(): DocIndex {
+  ensureDocsDir();
+  const toolsDir = join(getDocsDir(), "tools");
+  const byKey = new Map<string, DocEntry>();
+
+  if (existsSync(toolsDir)) {
+    for (const file of readdirSync(toolsDir)) {
+      if (!file.endsWith(".json")) continue;
+      let parsed: Partial<DocContent>;
+      try {
+        parsed = JSON.parse(readFileSync(join(toolsDir, file), "utf-8")) as Partial<DocContent>;
+      } catch {
+        continue; // fichier illisible → ignoré, jamais une erreur fatale
+      }
+      const meta = parsed.meta;
+      if (!meta || typeof meta.name !== "string" || typeof meta.version !== "string") continue;
+
+      const entry: DocEntry = {
+        name: meta.name,
+        version: meta.version,
+        type: meta.type || "tool",
+        description: (parsed.summary || "").substring(0, 200),
+        filePath: `tools/${file}`,
+        keywords: [meta.name, ...(parsed.keyPoints || []).slice(0, 5)],
+        updatedAt: meta.updatedAt || new Date().toISOString(),
+        sourceUrl: meta.sourceUrl,
+      };
+      byKey.set(`${entry.name}@${entry.version}`, entry);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const index: DocIndex = {
+    lastUpdated: now,
+    lastScan: now,
+    library: [...byKey.values()],
+  };
+  saveIndex(index);
+  return index;
 }

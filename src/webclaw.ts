@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
 import { getDataDir, getWebclawTimeoutMs } from "./config.js";
+import { resolveSetting, getSettingSource } from "./settings-store.js";
 import { httpFetch } from "./utils/http.js";
 
 // ── Configuration ──
@@ -45,14 +46,15 @@ function readConfigFile(): Partial<WebclawConfig> {
   }
 }
 
-/** Config effective : env prioritaire, fichier en repli, défaut en dernier ressort. */
+/**
+ * Config effective : env prioritaire, puis `$LIBRY_DATA_DIR/config.json`, puis le
+ * fichier historique `webclaw-config.json` (compat Pi-Web), puis le défaut.
+ */
 export function getWebclawConfig(): WebclawConfig {
-  const file = readConfigFile();
-  const envUrl = nonEmpty(process.env.WEBCLAW_URL);
-  const envKey = nonEmpty(process.env.WEBCLAW_API_KEY);
+  const legacy = readConfigFile();
   return {
-    url: envUrl ?? nonEmpty(file.url) ?? DEFAULT_WEBCLAW_URL,
-    apiKey: envKey ?? nonEmpty(file.apiKey) ?? "",
+    url: resolveSetting("WEBCLAW_URL", nonEmpty(legacy.url) ?? DEFAULT_WEBCLAW_URL),
+    apiKey: resolveSetting("WEBCLAW_API_KEY", nonEmpty(legacy.apiKey) ?? ""),
   };
 }
 
@@ -71,7 +73,7 @@ export function setWebclawConfig(config: Partial<WebclawConfig>): WebclawConfig 
 
 /** Vrai si WebClaw a une configuration EXPLICITE (env ou fichier). Booléen, sans secret. */
 export function isWebclawConfigured(): boolean {
-  if (nonEmpty(process.env.WEBCLAW_URL) || nonEmpty(process.env.WEBCLAW_API_KEY)) return true;
+  if (getSettingSource("WEBCLAW_URL") !== "default" || getSettingSource("WEBCLAW_API_KEY") !== "default") return true;
   return existsSync(configFilePath());
 }
 

@@ -1,23 +1,16 @@
 /**
  * Réservation des routes d'administration des clés (GET/POST/DELETE /keys).
  *
- * Deux origines autorisées :
- *   - la boucle locale RÉELLE, d'après l'adresse de la socket TCP
- *     (`isTrustedLocalRequest`, non forgeable via X-Forwarded-For) ;
- *   - une clé valide marquée administrateur (LIBRY_ADMIN_KEYS ou champ `admin`
- *     du fichier de clés).
+ * DÉLÈGUE à la logique de `requireAdmin` (Lot 4) : boucle locale RÉELLE
+ * (adresse de socket TCP, non forgeable via X-Forwarded-For) OU clé valide
+ * marquée administrateur OU session admin valide. Le message d'erreur historique
+ * est conservé pour ne pas modifier le contrat scripté.
  */
 import { type Request, type Response, type NextFunction } from "express";
-import { extractApiKey, validateKey, isAdminKey } from "../libry-auth.js";
-import { isTrustedLocalRequest } from "../utils/request-identity.js";
+import { isAdminRequest } from "./admin-session.js";
 
 export function libryAdminOnly(req: Request, res: Response, next: NextFunction): void {
-  if (isTrustedLocalRequest(req)) {
-    next();
-    return;
-  }
-  const provided = extractApiKey(req);
-  if (provided && validateKey(provided) && isAdminKey(provided)) {
+  if (isAdminRequest(req)) {
     next();
     return;
   }

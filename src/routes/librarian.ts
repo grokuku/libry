@@ -17,13 +17,16 @@ import {
   getLibraryStatus,
   searchAndArchive,
   archiveDoc,
+  deleteDoc,
+  reindexLibrary,
   sanitizeDocPathComponent,
   type DocEntry,
   type DocContent,
 } from "../library-store.js";
-import { loadKeys, createKey, revokeKey, keyIdOf, maskSecret } from "../libry-auth.js";
+import { loadKeys, createKey, revokeKey, regenerateKey, keyIdOf, maskSecret } from "../libry-auth.js";
 import { libryAuth } from "../middleware/auth.js";
 import { libryAdminOnly } from "../middleware/admin-only.js";
+import { requireAdmin, requireCsrfForSession, rejectDefaultPassword } from "../middleware/admin-session.js";
 import { getUpdateCwds } from "../config.js";
 
 const router = Router();
@@ -42,27 +45,55 @@ router.get("/keys", libryAdminOnly, (_req: Request, res: Response) => {
       name: k.name,
       createdAt: k.createdAt,
       key: k.keyPreview ?? (k.key ? maskSecret(k.key) : ""),
+      admin: Boolean(k.admin),
     })),
   });
 });
 
 // POST /api/librarian/keys — create a new key (admin only)
-router.post("/keys", libryAdminOnly, (req: Request, res: Response) => {
-  try {
-    const { name } = req.body;
-    if (!name || typeof name !== "string" || !name.trim()) {
-      return res.status(400).json({ error: "name is required" });
+// `admin: true` (optionnel) marque la clé administrateur. Action sensible :
+// CSRF si session + garde-fou mot de passe par défaut (scripté/loopback inchangé).
+router.post(
+  "/keys",
+  libryAdminOnly,
+  requireCsrfForSession,
+  rejectDefaultPassword,
+  (req: Request, res: Response) => {
+    try {
+      const { name, admin } = req.body;
+      if (!name || typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({ error: "name is required" });
+      }
+      const key = createKey(name, { admin: admin === true });
+      // Return the full key value only on creation
+      res.status(201).json(key);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
-    const key = createKey(name);
-    // Return the full key value only on creation
-    res.status(201).json(key);
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
+  },
+);
+
+// POST /api/librarian/keys/:id/regenerate — nouveau secret, MÊME id/name/createdAt/admin.
+// Le nouveau secret n'est affiché qu'une fois ; l'ancien cesse aussitôt de valider.
+router.post(
+  "/keys/:id/regenerate",
+  libryAdminOnly,
+  requireCsrfForSession,
+  rejectDefaultPassword,
+  (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const regenerated = regenerateKey(id);
+      if (!regenerated) return res.status(404).json({ error: "Key not found" });
+      res.status(201).json(regenerated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  },
+);
 
 // DELETE /api/librarian/keys/:id — revoke a key by its NON-secret id (admin only)
-router.delete("/keys/:id", libryAdminOnly, (req: Request, res: Response) => {
+router.delete("/keys/:id", libryAdminOnly, requireCsrfForSession, rejectDefaultPassword, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const deleted = revokeKey(id);
@@ -72,6 +103,48 @@ router.delete("/keys/:id", libryAdminOnly, (req: Request, res: Response) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ── Opérations admin sur les documents (Lot 5 — admin) ──
+// Actions sensibles : requireAdmin + CSRF (si session) + garde-fou mot de passe.
+// Le contrat scripté (loopback / clé admin en en-tête) reste strictement inchangé.
+
+// DELETE /api/librarian/doc/:name?version= — supprime le doc et son entrée d'index.
+router.delete(
+  "/doc/:name",
+  requireAdmin,
+  requireCsrfForSession,
+  rejectDefaultPassword,
+  (req: Request, res: Response) => {
+    try {
+      const { name } = req.params;
+      const version = typeof req.query.version === "string" ? req.query.version : undefined;
+      if (req.query.version !== undefined && version === undefined) {
+        return res.status(400).json({ error: "version must be a single string" });
+      }
+      const { deleted } = deleteDoc(name, version);
+      if (deleted === 0) return res.status(404).json({ error: "Doc not found" });
+      res.json({ success: true, deleted });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  },
+);
+
+// POST /api/librarian/library/reindex — reconstruit index.json en scannant docs/tools/*.json.
+router.post(
+  "/library/reindex",
+  requireAdmin,
+  requireCsrfForSession,
+  rejectDefaultPassword,
+  (_req: Request, res: Response) => {
+    try {
+      const index = reindexLibrary();
+      res.json({ success: true, totalDocs: index.library.length, index });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  },
+);
 
 // ── Public route (no auth) ──
 

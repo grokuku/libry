@@ -14,6 +14,7 @@ import { getHost, getPort, getAllowedOrigins, getRateLimitPerMin } from "./confi
 import librarianRouter from "./routes/librarian.js";
 import screenshotRouter from "./routes/screenshot.js";
 import webRouter from "./routes/web.js";
+import adminRouter from "./routes/admin.js";
 import { registerWebSearchProvider } from "./web-search.js";
 import { startShotPurgeTimer } from "./shot-store.js";
 
@@ -46,7 +47,7 @@ export function createApp(): express.Express {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key, X-CSRF-Token");
       res.setHeader("Access-Control-Max-Age", "600");
     }
     if (req.method === "OPTIONS") {
@@ -79,6 +80,19 @@ export function createApp(): express.Express {
 
   // ── Moteur web (même préfixe, clé requise, chemins distincts) ──
   app.use("/api/librarian", webRouter);
+
+  // ── Administration (préfixe NEUF, hors contrat /api/librarian) ──
+  // Lot 4 : authentification admin (login/session) + garde-fou mot de passe par
+  // défaut, branchés sur GET/PUT /settings (Lot 3) sans changer le préfixe.
+  app.use("/api/admin", adminRouter);
+
+  // ── Interface web statique (documentation, réglages) ──
+  // Montée après le rate-limit ET après /health et /api/* : l'API garde la
+  // priorité, jamais capturée. `public/` est embarqué par le Dockerfile
+  // (COPY public) ; résolu depuis src/ comme depuis dist/.
+  // Sans fallback SPA : une route inconnue retombe sur le 404 d'Express.
+  const publicDir = fileURLToPath(new URL("../public", import.meta.url));
+  app.use(express.static(publicDir));
 
   return app;
 }

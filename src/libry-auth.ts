@@ -270,6 +270,41 @@ export function revokeKey(id: string): boolean {
   return true;
 }
 
+/**
+ * Régénère le SECRET d'une clé existante en conservant son identité visible :
+ * MÊME `id`, `name`, `createdAt`, `admin`. Le nouveau secret n'est retourné
+ * qu'ici, une seule fois ; l'ANCIEN secret cesse immédiatement d'être accepté
+ * (cache de validation purgé).
+ *
+ * Une clé héritée sans `id` persisté voit son identifiant dérivé (de l'ancien
+ * secret) MATÉRIALISÉ et figé : il ne changera plus, y compris après plusieurs
+ * régénérations. Ne concerne QUE les clés du fichier — jamais les clés d'env
+ * (`lib-…` de LIBRY_LEGACY_KEYS), introuvables ici → retour null.
+ */
+export function regenerateKey(id: string): (LibryKey & { key: string }) | null {
+  const keys = loadKeys();
+  const idx = keys.findIndex((k) => keyIdOf(k) === id);
+  if (idx < 0) return null;
+
+  const current = keys[idx];
+  const stableId = keyIdOf(current);
+  const secret = generateKeyString();
+  const record: LibryKey = {
+    id: stableId,
+    name: current.name,
+    createdAt: current.createdAt,
+    keyPreview: maskSecret(secret),
+    keyHash: hashSecret(secret),
+    ...(current.admin ? { admin: true } : {}),
+  };
+  keys[idx] = record;
+  saveKeys(keys);
+  // L'ancien secret doit cesser de valider : on purge le cache mémo (sinon, le
+  // même `id` conservé ferait passer l'ancien secret par le raccourci du cache).
+  validationCache.clear();
+  return { ...record, key: secret };
+}
+
 // ── Extraction de clé présentée ──
 
 /**

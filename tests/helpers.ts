@@ -4,6 +4,8 @@ import { join } from "path";
 import type { Express } from "express";
 import { createApp } from "../src/index.js";
 import { resetAuthCaches } from "../src/libry-auth.js";
+import { resetSettingsCache } from "../src/settings-store.js";
+import { setSessionTtlForTests } from "../src/session-store.js";
 import { setFetchForTests, type FetchLike } from "../src/utils/http.js";
 import { setScrapeDelayForTests } from "../src/web-search.js";
 
@@ -91,6 +93,7 @@ export function makeTestEnv(overrides: Record<string, string> = {}): TestEnv {
   delete process.env.LIBRY_SHOT_INLINE_HTML;
   delete process.env.LIBRY_CHROMIUM_NO_SANDBOX;
   delete process.env.CHROMIUM_PATH;
+  delete process.env.LIBRY_SESSION_TTL_HOURS;
   // Moteur web : configuration neutralisée + réseau coupé.
   delete process.env.WEBCLAW_URL;
   delete process.env.WEBCLAW_API_KEY;
@@ -100,6 +103,8 @@ export function makeTestEnv(overrides: Record<string, string> = {}): TestEnv {
   for (const [k, v] of Object.entries(overrides)) process.env[k] = v;
 
   resetAuthCaches();
+  resetSettingsCache();
+  setSessionTtlForTests(null);
   setFetchForTests(unreachableFetch);
   setScrapeDelayForTests(0);
 

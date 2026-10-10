@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="neutre-dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <title>Libry</title>
+  <meta name="description" content="Libry — bibliothèque de documents et services web." />
+  <link rel="icon" href="data:," />
+
+  <!-- Marqueur inerte exigé par le garde d'idempotence de la brique `tokens`
+       (elle n'injecte alors AUCUNE balise <style> — tout le CSS est servi en
+       fichiers, compatible CSP style-src 'self'). -->
+  <meta id="holaf-tokens-style" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <!-- CSS des briques extraits via getCss() (scripts/extract-holaf-css.mjs). -->
+  <link rel="stylesheet" href="vendor/holaf/holaf-modal.css" />
+  <link rel="stylesheet" href="vendor/holaf/holaf-toast.css" />
+
+  <!-- Brique FONDATION `tokens` : la SEULE autorisée à poser les variables
+       --holaf-* sur :root. Script classique (aucun export ESM) et SYNCHRONE :
+       le thème est posé avant le premier rendu. -->
+  <script src="vendor/holaf/holaf-tokens.js"></script>
+  <script>
+    /*
+     * Boot du thème — INLINE et SYNCHRONE (anti-flash) : lit `localStorage`
+     * (« libry.theme », défaut `neutre-dark`), migre les anciens noms via
+     * HolafTokens.MIGRATIONS et pose le preset AVANT le premier rendu.
+     * Toute erreur est non bloquante : les alias de styles.css portent un
+     * repli hexadécimal, le rendu reste lisible sans la brique.
+     */
+    (() => {
+      "use strict";
+      const KEY = "libry.theme";
+      const DEFAULT = "neutre-dark";
+      const tokens = window.HolafTokens;
+      if (!tokens) return;
+      try {
+        const stored = window.localStorage.getItem(KEY);
+        const value = (stored && tokens.MIGRATIONS[stored]) || stored || DEFAULT;
+        tokens.setTheme(value);
+        document.documentElement.setAttribute("data-theme", value);
+        if (stored && stored !== value) window.localStorage.setItem(KEY, value);
+      } catch {
+        /* Valeur stockée illisible (mode privé) ou preset inconnu : défaut. */
+        try {
+          tokens.setTheme(DEFAULT);
+          document.documentElement.setAttribute("data-theme", DEFAULT);
+        } catch {
+          /* Brique indisponible : le repli hexadécimal de styles.css s'applique. */
+        }
+      }
+    })();
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">L</span>
+      <div class="brand-text">
+        <h1>Libry</h1>
+        <p>Bibliothèque de documents &amp; services web</p>
+      </div>
+    </div>
+
+    <!-- Sélecteur de thème (familles × mode) : rempli par app.js depuis
+         HolafTokens.listFamilies(). Masqué tant que la brique n'est pas là. -->
+    <div class="theme-control" id="theme-control" hidden>
+      <label class="sr-only" for="theme-family">Famille de thème</label>
+      <select id="theme-family" name="theme-family"></select>
+      <button type="button" id="theme-toggle" class="theme-toggle"
+              aria-label="Basculer entre clair et sombre"
+              title="Basculer entre clair et sombre"></button>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Sections de l'interface">
+      <button type="button" class="tab is-active" role="tab" id="tab-docs"
+              data-tab="docs" aria-selected="true" aria-controls="panel-docs">
+        Documentation
+      </button>
+      <button type="button" class="tab" role="tab" id="tab-settings"
+              data-tab="settings" aria-selected="false" aria-controls="panel-settings">
+        Réglages
+      </button>
+    </nav>
+  </header>
+
+  <main class="content">
+    <section class="panel" id="panel-docs" role="tabpanel" aria-labelledby="tab-docs">
+      <header class="panel-head">
+        <h2>Documentation</h2>
+        <p class="panel-hint">Catalogue des documents de la bibliothèque.</p>
+      </header>
+
+      <div class="toolbar">
+        <div class="field field--grow">
+          <label class="sr-only" for="docs-filter">Filtrer les documents</label>
+          <input type="search" id="docs-filter" autocomplete="off"
+                 placeholder="Filtrer par nom, type ou mot-clé…" />
+        </div>
+        <span class="toolbar-status" id="docs-status" role="status" aria-live="polite"></span>
+        <button type="button" class="btn" id="docs-reload">Rafraîchir</button>
+        <button type="button" class="btn btn--accent" id="docs-reindex">Réindexer</button>
+      </div>
+
+      <div class="docs-layout">
+        <div class="docs-list-wrap">
+          <p class="empty" id="docs-empty">Chargement…</p>
+          <ul class="docs-list" id="docs-list"></ul>
+        </div>
+        <div class="docs-detail" id="doc-detail" hidden></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <header class="panel-head">
+        <h2>Réglages</h2>
+        <p class="panel-hint">Configuration du service, clés d'accès et mot de passe.</p>
+      </header>
+
+      <!-- Bandeau rouge : visible tant que le mot de passe admin est le défaut. -->
+      <div class="banner banner--danger" id="default-password-banner" role="alert" hidden>
+        <strong>Mot de passe administrateur par défaut.</strong>
+        <span>Les actions sensibles (gestion des clés, suppression de documents,
+          modification des réglages) sont bloquées tant que le mot de passe n'a pas
+          été changé. Utilisez « Changer le mot de passe » ci-dessous.</span>
+      </div>
+
+      <!-- Connexion / session -->
+      <section class="card" id="session-card">
+        <div id="login-view">
+          <h3 class="card-title">Connexion administrateur</h3>
+          <form id="login-form" class="form-row" autocomplete="on">
+            <div class="field">
+              <label for="login-password">Mot de passe</label>
+              <input type="password" id="login-password" name="password"
+                     autocomplete="current-password" required />
+            </div>
+            <button type="submit" class="btn btn--accent">Se connecter</button>
+          </form>
+          <p class="muted">Première utilisation : le mot de passe par défaut est
+            <code>admin</code> — changez-le dès la connexion.</p>
+        </div>
+
+        <div id="session-view" hidden>
+          <h3 class="card-title">Session administrateur</h3>
+          <p class="session-line">
+            <span class="badge badge--ok">Connecté</span>
+            <span id="session-status" class="muted"></span>
+            <button type="button" class="btn btn--ghost" id="logout-btn">Déconnexion</button>
+          </p>
+          <details class="disclosure" id="password-change">
+            <summary>Changer le mot de passe</summary>
+            <form id="password-form" class="form-col">
+              <div class="field">
+                <label for="pwd-current">Mot de passe actuel</label>
+                <input type="password" id="pwd-current" autocomplete="current-password" required />
+              </div>
+              <div class="field">
+                <label for="pwd-next">Nouveau mot de passe</label>
+                <input type="password" id="pwd-next" autocomplete="new-password" required minlength="4" />
+              </div>
+              <div class="field">
+                <label for="pwd-confirm">Confirmer le nouveau mot de passe</label>
+                <input type="password" id="pwd-confirm" autocomplete="new-password" required minlength="4" />
+              </div>
+              <button type="submit" class="btn btn--accent">Changer le mot de passe</button>
+            </form>
+          </details>
+        </div>
+      </section>
+
+      <!-- Clés API -->
+      <section class="card" id="keys-card" hidden>
+        <h3 class="card-title">Clés API</h3>
+        <p class="muted">Les clés donnent accès au contrat <code>/api/librarian</code>.
+          Le secret complet n'est affiché qu'une seule fois, à la création ou à la
+          régénération — conservez-le en lieu sûr.</p>
+        <form id="key-form" class="form-row">
+          <div class="field field--grow">
+            <label for="key-name">Nom de la nouvelle clé</label>
+            <input type="text" id="key-name" autocomplete="off" placeholder="ex. yuki-prod" />
+          </div>
+          <label class="checkbox">
+            <input type="checkbox" id="key-admin" /> Clé administrateur
+          </label>
+          <button type="submit" class="btn btn--accent">Créer la clé</button>
+        </form>
+        <p class="empty" id="keys-empty" hidden>Aucune clé.</p>
+        <ul class="list" id="keys-list"></ul>
+      </section>
+
+      <!-- Paramètres -->
+      <section class="card" id="settings-card" hidden>
+        <h3 class="card-title">Paramètres</h3>
+        <p class="muted">Valeurs résolues par <code>env&nbsp;→ fichier&nbsp;→ défaut</code>.
+          Un réglage fourni par l'environnement (badge <em>env</em>) est en lecture seule.</p>
+        <div id="settings-form"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn--accent" id="settings-save">Enregistrer</button>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Libry — service de l'écosystème holaf</span>
+  </footer>
+
+  <!-- Briques holaf-lib vendorisées (copiées VERBATIM par le CLI de la
+       librairie ; versions et empreintes dans vendor/holaf/). Chargées en
+       MODULES : ces fichiers sont « dual » (export ESM + global window.*) —
+       un <script> classique échouerait sur leur `export` top-level. Les
+       modules s'exécutent dans l'ordre du document, app.js en dernier. -->
+  <script type="module" src="vendor/holaf/holaf-icons.js"></script>
+  <script type="module" src="vendor/holaf/holaf-modal.js"></script>
+  <script type="module" src="vendor/holaf/holaf-toast.js"></script>
+  <script type="module" src="vendor/holaf/holaf-fetch.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

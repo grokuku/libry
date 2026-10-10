@@ -52,6 +52,34 @@ npm run dev               # tsx watch (défaut : 0.0.0.0:3007)
 | `npm start` | Démarre le serveur compilé (`node dist/index.js`). |
 | `npm test` | Tests (vitest). |
 | `npm run typecheck` | Vérification de types sans émission. |
+| `npm run check:vendor` | Empreintes des briques holaf vendorisées (CI, hors réseau). |
+
+## Interface web & briques holaf-lib
+
+`public/` — l'interface (vanilla, servie sans build) — consomme cinq briques de
+holaf-lib, copiées **verbatim** par le CLI de la librairie dans
+`public/vendor/holaf/` :
+
+| Brique | Rôle côté Libry | Version pinnée |
+| --- | --- | --- |
+| `tokens` | SEULE à poser les variables `--holaf-*` ; `styles.css` les aliase avec repli hex | 0.6.0 |
+| `icons` | icônes SVG (bascule clair/sombre) | 0.1.6 |
+| `modal` | modale autonome (CSS extrait en fichier) | 0.7.0 |
+| `toast` | notifications (CSS extrait en fichier) | 0.8.0 |
+| `fetch` | client HTTP | 0.2.0 |
+
+Source de vérité : `/projects/holaf-lib` — ne JAMAIS éditer
+`public/vendor/holaf/*.js` à la main.
+
+### Procédure d'upgrade d'une brique
+
+1. `printf 'y\n' | /projects/holaf-lib/scripts/holaf upgrade <brique> /projects/Libry/public`
+   (le CLI cible toujours `<DEST>/vendor/holaf`).
+2. `node scripts/extract-holaf-css.mjs` — ré-extraie `holaf-modal.css` /
+   `holaf-toast.css` via `getCss()` (le CLI ne copie jamais les CSS).
+3. `node scripts/generate-holaf-checksums.mjs` — refige les empreintes SHA-256.
+4. `npm run check:vendor` puis `npm test`. La CI exécute `check:vendor` : le
+   CLI holaf n'existe pas sur GitHub, ces empreintes sont l'invariant.
 
 ## Déploiement (serveur)
 

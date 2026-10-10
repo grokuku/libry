@@ -43,6 +43,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
+# Interface web statique (HTML/CSS/JS, sans étape de build) : copiée AVANT le
+# chown pour que l'utilisateur non-root puisse la lire.
+COPY public ./public
 
 # Utilisateur NON-ROOT (uid fixe). Le répertoire de données lui appartient :
 # Libry n'écrit que dans SON volume, jamais dans celui de Pi-Web.
