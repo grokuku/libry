@@ -12,9 +12,14 @@
  *          CÔTÉ CLIENT (jamais `POST /search`, qui déclenche la cascade web),
  *          vue détaillée (`GET /api/librarian/doc/:name`), suppression (modale)
  *          et réindexation ;
- *        - Réglages : connexion/session, bandeau « mot de passe par défaut »,
- *          clés API (création/régénération/suppression, secret affiché UNE
- *          seule fois), paramètres groupés (`GET/PUT /api/admin/settings`).
+ *        - Réglages : session (déconnexion après connexion, bandeau « mot de
+ *          passe par défaut », changement de mot de passe), clés API
+ *          (création/régénération/suppression, secret affiché UNE seule fois),
+ *          paramètres groupés (`GET/PUT /api/admin/settings`).
+ *
+ * Porte d'entrée : au chargement, `GET /api/admin/session` tranche — hors
+ * session, SEUL l'écran de connexion (#login-screen) est affiché ; le
+ * conteneur applicatif (#app) reste masqué jusqu'à `authenticated: true`.
  *
  * Le premier rendu (anti-flash) est déjà posé par le boot inline du <head>.
  *
@@ -453,7 +458,7 @@
       state.authenticated = false;
       state.passwordIsDefault = false;
       renderSession();
-      notify(fallbackMessage || "Session requise — connectez-vous dans l'onglet Réglages.", "error");
+      notify(fallbackMessage || "Session requise — connectez-vous.", "error");
       refreshSession();
       return;
     }
@@ -498,13 +503,16 @@
     if (banner) banner.hidden = !(state.authenticated && state.passwordIsDefault);
   }
 
-  /** Reflète l'état de session dans les cartes Réglages / Documentation. */
+  /** Reflète l'état de session : bascule l'écran de connexion / l'application. */
   function renderSession() {
-    const loginView = $("login-view");
+    const loginScreen = $("login-screen");
+    const app = $("app");
     const sessionView = $("session-view");
     const keysCard = $("keys-card");
     const settingsCard = $("settings-card");
-    if (loginView) loginView.hidden = state.authenticated;
+    // La porte d'entrée : hors session, SEUL l'écran de connexion est affiché.
+    if (loginScreen) loginScreen.hidden = state.authenticated;
+    if (app) app.hidden = !state.authenticated;
     if (sessionView) sessionView.hidden = !state.authenticated;
     if (keysCard) keysCard.hidden = !state.authenticated;
     if (settingsCard) settingsCard.hidden = !state.authenticated;
@@ -547,6 +555,14 @@
     }
   }
 
+  /** Message d'erreur en ligne de l'écran de connexion ("" = masqué). */
+  function setLoginError(message) {
+    const el = $("login-error");
+    if (!el) return;
+    el.textContent = message || "";
+    el.hidden = !message;
+  }
+
   function wireLogin() {
     const form = $("login-form");
     if (!form) return;
@@ -555,6 +571,7 @@
       const passwordInput = $("login-password");
       const password = passwordInput ? passwordInput.value : "";
       if (!password) return;
+      setLoginError("");
       // Le login exige le double-submit : GET /session a déjà posé le cookie.
       if (!state.csrfToken) await refreshSession();
       try {
@@ -564,13 +581,15 @@
           csrf: state.csrfToken,
         });
         if (passwordInput) passwordInput.value = "";
+        setLoginError("");
         notify("Connexion réussie.");
         applySession(data);
       } catch (err) {
         if (err && err.status === 401) {
-          notify("Mot de passe incorrect.", "error");
+          setLoginError("Mot de passe incorrect.");
+          if (passwordInput) passwordInput.focus();
         } else if (err && err.status === 429) {
-          notify("Trop de tentatives — réessayez dans une minute.", "error");
+          setLoginError("Trop de tentatives — réessayez dans une minute.");
         } else {
           handleApiError(err, "Échec de la connexion.");
         }
@@ -592,6 +611,9 @@
       state.library = [];
       state.keys = [];
       state.settingsGroups = [];
+      setLoginError("");
+      const passwordInput = $("login-password");
+      if (passwordInput) passwordInput.value = "";
       renderSession();
       renderDocList();
       notify("Déconnecté.");
@@ -692,7 +714,7 @@
     list.replaceChildren();
 
     if (!state.authenticated) {
-      docsEmpty("Connectez-vous (onglet Réglages) pour afficher la documentation.");
+      docsEmpty("Connectez-vous pour afficher la documentation.");
       return;
     }
     if (state.library.length === 0) {
@@ -745,7 +767,7 @@
       if (err && err.status === 401) {
         state.authenticated = false;
         renderSession();
-        docsEmpty("Connectez-vous (onglet Réglages) pour afficher la documentation.");
+        docsEmpty("Connectez-vous pour afficher la documentation.");
         return;
       }
       handleApiError(err, "Impossible de charger la documentation.");

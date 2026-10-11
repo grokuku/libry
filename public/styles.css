@@ -225,6 +225,30 @@ html[data-theme$="-light"] .theme-toggle .icon--moon {
   padding: 22px;
 }
 
+/* ── Porte d'entrée : écran de connexion / conteneur applicatif ──────── */
+
+/* Les deux racines occupent toute la hauteur. `#app` porte l'attribut
+   `hidden` par défaut (index.html) : le conteneur applicatif n'apparaît
+   qu'après `authenticated: true`, l'écran de connexion est alors masqué. */
+#app,
+.login-screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 100vh;
+}
+
+/* Message d'erreur de connexion (mot de passe incorrect, trop de tentatives). */
+.login-error {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--libry-danger) 55%, transparent);
+  border-radius: var(--libry-radius);
+  background: color-mix(in srgb, var(--libry-danger) 12%, transparent);
+  color: var(--libry-danger);
+  font-size: 14px;
+}
+
 .panel-head {
   margin-bottom: 14px;
 }

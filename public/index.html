@@ -55,6 +55,43 @@
   </script>
 </head>
 <body>
+  <!-- Écran de connexion — PORTE D'ENTRÉE de l'interface. C'est le SEUL
+       contenu rendu tant que `GET /api/admin/session` n'a pas confirmé la
+       session : le conteneur applicatif (#app) est masqué par défaut, aucun
+       en-tête, onglet, liste ni modale ne transparaît avant l'authentification. -->
+  <div class="login-screen" id="login-screen">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">L</span>
+        <div class="brand-text">
+          <h1>Libry</h1>
+          <p>Bibliothèque de documents &amp; services web</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="content login-content">
+      <section class="card login-card">
+        <h2 class="card-title">Connexion administrateur</h2>
+        <p class="muted">Entrez le mot de passe administrateur pour accéder à Libry.</p>
+        <form id="login-form" class="form-row" autocomplete="on">
+          <div class="field field--grow">
+            <label for="login-password">Mot de passe</label>
+            <input type="password" id="login-password" name="password"
+                   autocomplete="current-password" required />
+          </div>
+          <button type="submit" class="btn btn--accent">Se connecter</button>
+        </form>
+        <p class="login-error" id="login-error" role="alert" hidden></p>
+        <p class="muted">Connectez-vous pour afficher la documentation. Première
+          utilisation : le mot de passe par défaut est <code>admin</code> —
+          changez-le dès la connexion.</p>
+      </section>
+    </main>
+  </div>
+
+  <!-- Conteneur applicatif — masqué tant que la session n'est pas confirmée. -->
+  <div id="app" hidden>
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">L</span>
@@ -127,22 +164,8 @@
           été changé. Utilisez « Changer le mot de passe » ci-dessous.</span>
       </div>
 
-      <!-- Connexion / session -->
+      <!-- Session (le champ de connexion vit désormais sur l'écran d'entrée). -->
       <section class="card" id="session-card">
-        <div id="login-view">
-          <h3 class="card-title">Connexion administrateur</h3>
-          <form id="login-form" class="form-row" autocomplete="on">
-            <div class="field">
-              <label for="login-password">Mot de passe</label>
-              <input type="password" id="login-password" name="password"
-                     autocomplete="current-password" required />
-            </div>
-            <button type="submit" class="btn btn--accent">Se connecter</button>
-          </form>
-          <p class="muted">Première utilisation : le mot de passe par défaut est
-            <code>admin</code> — changez-le dès la connexion.</p>
-        </div>
-
         <div id="session-view" hidden>
           <h3 class="card-title">Session administrateur</h3>
           <p class="session-line">
@@ -207,6 +230,7 @@
   <footer class="footer">
     <span>Libry — service de l'écosystème holaf</span>
   </footer>
+  </div><!-- /#app -->
 
   <!-- Briques holaf-lib vendorisées (copiées VERBATIM par le CLI de la
        librairie ; versions et empreintes dans vendor/holaf/). Chargées en
