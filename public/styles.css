@@ -857,6 +857,59 @@ code {
   font-size: 14px;
 }
 
+/* ── Liste blanche des adresses internes ──────────────────────────────── */
+
+.allowlist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+  margin: 14px 0 4px;
+}
+
+.allowlist-col h4 {
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--libry-text-muted);
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--libry-border);
+  border-radius: 999px;
+  background: var(--libry-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.chip .chip-label {
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
 /* ── Secret affiché une seule fois (modale) ───────────────────────────── */
 
 .secret-box {

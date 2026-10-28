@@ -158,6 +158,8 @@ inter-services).
 | `LIBRY_LEGACY_KEYS` | *(vide)* | Clés historiques `lib-…` acceptées hors fichier de clés. |
 | `LIBRY_ADMIN_KEYS` | *(vide)* | Clés marquées administrateur. |
 | `LIBRY_UPDATE_CWDS` | *(vide)* | Liste blanche de chemins pour `POST /update`. |
+| `LIBRY_SSRF_ALLOWED_HOSTS` | *(vide)* | **Noms d'hôtes du réseau interne** que Libry a le droit d'atteindre (ex. `switchy,pi-web,*.holaf.lan`). Vide = aucune adresse interne (protection anti-SSRF). Éditable dans l'interface, onglet **Réglages → Adresses internes autorisées**. |
+| `LIBRY_SSRF_ALLOWED_CIDRS` | *(vide)* | **Plages d'adresses** autorisées (ex. `10.10.0.0/16,192.168.1.20/32`). Éditable dans l'interface. |
 | `WEBCLAW_URL` | `http://localhost:3001` | URL de WebClaw (compose : `http://webclaw:3000`). |
 | `WEBCLAW_API_KEY` | *(vide)* | Clé WebClaw (secret, en-tête Bearer). **Requise pour la recherche web** : sans elle, `/v1/*` répond 401 et `/search` reste silencieusement vide côté web (le journal serveur l'indique). |
 | `LIBRY_TAVILY_API_KEY` | *(vide)* | Clé Tavily (secret, 2e étage de la cascade). |
@@ -167,6 +169,29 @@ inter-services).
 
 Journal du service : `docker compose logs libry` (Libry ne renvoie au client que
 des messages génériques ; la cause réelle est **toujours** journalisée).
+
+### Adresses internes (anti-SSRF)
+
+Par défaut, Libry **refuse toute adresse interne** (loopback, RFC1918 `10/8`,
+`172.16/12`, `192.168/16`, CGNAT `100.64/10`, ULA `fc00::/7`) et toute adresse
+lien-local (`169.254.0.0/16`, dont les métadonnées cloud `169.254.169.254`).
+
+Pour autoriser **certaines** cibles internes, utilisez l'onglet **Réglages →
+Adresses internes autorisées** (aucune édition de fichier nécessaire) :
+
+- **Noms d'hôtes** (recommandé) : `switchy`, `pi-web`, `nas.lan`, `*.holaf.lan`.
+  Un nom autorisé ne peut résoudre que vers une adresse **interne** ; s'il se met
+  à résoudre vers Internet, la cible est refusée (garde anti DNS-rebinding). Pour
+  la capture d'écran, la résolution validée est **épinglée**
+  (`--host-resolver-rules`).
+- **Plages CIDR** : `10.10.0.0/16`, `192.168.1.20/32`. Une plage ouvre **toutes**
+  les adresses qu'elle contient — à réserver aux cas où le nom ne suffit pas.
+
+Protections **jamais** désactivées, même avec une liste large : `file://`,
+identifiants dans l'URL, adresses lien-local/métadonnées cloud, et redirections
+vers une adresse non autorisée. Chaque autorisation utilisée est journalisée
+(`[ssrf] internal access allowed route=… host=… ip=… via=…`, jamais l'URL
+complète) et visible dans l'interface (« Autorisations utilisées récemment »).
 
 | Symptôme | Cause réelle | Action |
 | --- | --- | --- |

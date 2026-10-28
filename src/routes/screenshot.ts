@@ -7,6 +7,11 @@
  * Sécurité :
  *   - SSRF OBLIGATOIRE avant tout spawn (`validateHttpUrl`/`resolveHttpTarget`) :
  *     403 avec message STABLE et NON fuyant (jamais l'IP résolue ni la cause) ;
+ *   - liste blanche des adresses internes (`LIBRY_SSRF_ALLOWED_HOSTS` /
+ *     `LIBRY_SSRF_ALLOWED_CIDRS`, vide par défaut) : quand elle autorise la
+ *     cible, la chaîne de REDIRECTIONS est vérifiée avant le spawn (une
+ *     redirection hors liste blanche reste refusée) et l'autorisation utilisée
+ *     est journalisée ;
  *   - `file://`/`htmlPath` JAMAIS exposés ; le HTML inline n'est accepté que si
  *     LIBRY_SHOT_INLINE_HTML=true (désactivé par défaut) ;
  *   - la résolution DNS est épinglée (`--host-resolver-rules`) sur l'IP validée
@@ -23,6 +28,7 @@ import { tmpdir } from "os";
 import path from "path";
 import { libryAuth } from "../middleware/auth.js";
 import { resolveHttpTarget, type ResolvedHttpTarget } from "../utils/ssrf.js";
+import { probeRedirectChain } from "../utils/redirect-guard.js";
 import { shotQueue, ShotQueueFullError } from "../shot-queue.js";
 import {
   performCapture,
@@ -82,7 +88,7 @@ router.post("/screenshot", libryAuth, async (req: Request, res: Response) => {
     // ── SSRF OBLIGATOIRE AVANT LE SPAWN ──
     let resolved: ResolvedHttpTarget;
     try {
-      resolved = await resolveHttpTarget(urlRaw);
+      resolved = await resolveHttpTarget(urlRaw, { route: "screenshot" });
     } catch (e) {
       const message = e instanceof Error ? e.message : "";
       if (message.startsWith("Blocked")) {
@@ -93,6 +99,13 @@ router.post("/screenshot", libryAuth, async (req: Request, res: Response) => {
     }
     targetUrl = resolved.url;
     resolverRule = buildResolverRule(resolved);
+
+    // Cible INTERNE autorisée : vérifier la chaîne de redirections AVANT le
+    // spawn — une adresse non autorisée en fin de chaîne reste refusée.
+    if (resolved.grant) {
+      const probe = await probeRedirectChain(resolved.url, { route: "screenshot" });
+      if (!probe.ok) return res.status(403).json({ error: "URL not allowed" });
+    }
   }
 
   // ── Concurrence bornée : slot unique par capture ──

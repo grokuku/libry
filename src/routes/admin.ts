@@ -15,6 +15,8 @@
  *   GET  /settings → réglages groupés (valeur effective OU secret masqué).
  *   PUT  /settings → écrit `$LIBRY_DATA_DIR/config.json` (validation, verrous env).
  *                    CSRF (si session) + garde-fou mot de passe par défaut.
+ *   GET  /ssrf-log → journal des AUTORISATIONS d'adresses internes utilisées
+ *                    (nom, IP, entrée de liste blanche, route) — sans secret.
  *
  * Aucun secret n'est JAMAIS renvoyé en clair : seuls `{configured, preview:"••••"}`.
  */
@@ -42,6 +44,7 @@ import {
   writeSettings,
   type SettingSpec,
 } from "../settings-store.js";
+import { getSsrfAuditLog } from "../utils/ssrf.js";
 
 const router = Router();
 
@@ -216,6 +219,13 @@ router.put("/settings", requireAdmin, requireCsrfForSession, rejectDefaultPasswo
   const changed = Object.keys(updates);
   if (changed.length > 0) writeSettings(updates);
   res.json({ success: true, updated: changed, groups: buildGroups() });
+});
+
+// GET /api/admin/ssrf-log — journal des autorisations d'adresses internes.
+// Ne contient AUCUN secret : nom d'hôte, IP contactée, entrée de liste
+// blanche utilisée et route appelante (l'URL complète n'est jamais exposée).
+router.get("/ssrf-log", requireAdmin, (_req: Request, res: Response) => {
+  res.json({ entries: getSsrfAuditLog(50) });
 });
 
 export default router;

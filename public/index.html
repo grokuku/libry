@@ -214,6 +214,84 @@
         <ul class="list" id="keys-list"></ul>
       </section>
 
+      <!-- Adresses internes autorisées (liste blanche anti-SSRF). Section
+           DÉDIÉE : ajout/suppression d'entrées une par une, avertissement
+           visible dès que la liste n'est pas vide, journal des autorisations
+           utilisées. Les deux réglages qu'elle pilote
+           (LIBRY_SSRF_ALLOWED_HOSTS / LIBRY_SSRF_ALLOWED_CIDRS) sont masqués
+           du formulaire générique ci-dessous. -->
+      <section class="card" id="internal-access-card" hidden>
+        <h3 class="card-title">Adresses internes autorisées</h3>
+        <p class="muted">Par défaut, Libry <strong>refuse toutes les adresses de
+          votre réseau interne</strong> (10.x, 172.16–31.x, 192.168.x, localhost,
+          100.64.x). C'est une protection anti-SSRF : sans elle, un service
+          extérieur pourrait faire visiter votre réseau à Libry. Ajoutez ici,
+          <strong>une par une</strong>, les seules cibles que Libry a le droit
+          d'atteindre. Liste vide = aucune adresse interne joignable.</p>
+
+        <div class="banner banner--danger" id="internal-access-warning" role="alert" hidden>
+          <strong>Liste blanche active.</strong>
+          <span>Libry peut atteindre les adresses du réseau interne listées
+            ci-dessous (recherche, lecture de page, crawl, capture d'écran).
+            Restent <em>toujours</em> refusés : <code>file://</code>, les
+            métadonnées cloud (<code>169.254.169.254</code>) et toute
+            redirection vers une adresse non listée.</span>
+        </div>
+
+        <div class="allowlist-grid">
+          <div class="allowlist-col">
+            <h4>Noms d'hôtes <span class="badge badge--ok">recommandé</span></h4>
+            <p class="setting-help">Ex. <code>switchy</code>, <code>pi-web</code>,
+              <code>nas.lan</code>, <code>*.holaf.lan</code>. Un nom autorisé ne
+              peut résoudre que vers une adresse interne : s'il se met à pointer
+              vers Internet, la cible est refusée (anti DNS-rebinding).</p>
+            <ul class="chip-list" id="allowlist-hosts"></ul>
+            <p class="empty" id="allowlist-hosts-empty" hidden>Aucun nom d'hôte autorisé.</p>
+            <form class="form-row" id="allowlist-host-form" autocomplete="off">
+              <div class="field field--grow">
+                <label class="sr-only" for="allowlist-host-input">Nom d'hôte à autoriser</label>
+                <input type="text" id="allowlist-host-input"
+                       placeholder="ex. switchy ou *.holaf.lan" autocomplete="off" />
+              </div>
+              <button type="submit" class="btn">Ajouter</button>
+            </form>
+            <p class="login-error" id="allowlist-host-error" role="alert" hidden></p>
+          </div>
+
+          <div class="allowlist-col">
+            <h4>Plages d'adresses (CIDR)</h4>
+            <p class="setting-help">Ex. <code>10.10.0.0/16</code>,
+              <code>192.168.1.0/24</code>, <code>192.168.1.20/32</code> (une seule
+              adresse). Une plage ouvre <strong>toutes</strong> les adresses qu'elle
+              contient : préférez un nom d'hôte ou une plage étroite.</p>
+            <ul class="chip-list" id="allowlist-cidrs"></ul>
+            <p class="empty" id="allowlist-cidrs-empty" hidden>Aucune plage autorisée.</p>
+            <form class="form-row" id="allowlist-cidr-form" autocomplete="off">
+              <div class="field field--grow">
+                <label class="sr-only" for="allowlist-cidr-input">Plage CIDR à autoriser</label>
+                <input type="text" id="allowlist-cidr-input"
+                       placeholder="ex. 10.10.0.0/16" autocomplete="off" />
+              </div>
+              <button type="submit" class="btn">Ajouter</button>
+            </form>
+            <p class="login-error" id="allowlist-cidr-error" role="alert" hidden></p>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn--accent" id="internal-access-save">Enregistrer</button>
+        </div>
+
+        <details class="disclosure" id="ssrf-log-details">
+          <summary>Autorisations utilisées récemment</summary>
+          <p class="setting-help">Chaque fois que Libry atteint une adresse interne
+            autorisée, l'accès est tracé ici : quelle route a appelé, quel hôte,
+            quelle adresse, et quelle entrée de la liste l'a permis.</p>
+          <p class="empty" id="ssrf-log-empty" hidden>Aucune autorisation utilisée.</p>
+          <ul class="list" id="ssrf-log"></ul>
+        </details>
+      </section>
+
       <!-- Paramètres -->
       <section class="card" id="settings-card" hidden>
         <h3 class="card-title">Paramètres</h3>

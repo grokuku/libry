@@ -11,6 +11,9 @@
  * Sécurité :
  *   - SSRF OBLIGATOIRE sur TOUTE URL cible (réutilise `src/utils/ssrf.ts`) :
  *     403 avec message STABLE et NON fuyant ;
+ *   - LISTE BLANCHE des adresses internes (vide par défaut, `env ?? fichier`) :
+ *     une cible interne n'est acceptée que si son nom ou sa plage y figure ;
+ *     chaque autorisation utilisée est journalisée (hôte + IP, sans secret) ;
  *   - bornes de taille sur les réponses renvoyées (pages, URLs, contenu) ;
  *   - timeout par appel (AbortSignal) → 504 ;
  *   - erreurs GÉNÉRIQUES : jamais l'URL ni la clé de WebClaw dans la réponse.
@@ -46,12 +49,12 @@ const MAX_ARRAY_ITEMS = 200;
 
 type TargetOutcome = { ok: true; url: string } | { ok: false; status: 400 | 403; body: { error: string } };
 
-async function validateTarget(rawUrl: unknown): Promise<TargetOutcome> {
+async function validateTarget(rawUrl: unknown, route: string): Promise<TargetOutcome> {
   if (typeof rawUrl !== "string" || rawUrl.trim() === "") {
     return { ok: false, status: 400, body: { error: "Missing 'url' in body" } };
   }
   try {
-    const target = await resolveHttpTarget(rawUrl.trim());
+    const target = await resolveHttpTarget(rawUrl.trim(), { route });
     return { ok: true, url: target.url };
   } catch (e) {
     const message = e instanceof Error ? e.message : "";
@@ -65,7 +68,7 @@ async function validateTarget(rawUrl: unknown): Promise<TargetOutcome> {
 
 type UrlsOutcome = { ok: true; urls: string[] } | { ok: false; status: 400 | 403; body: { error: string } };
 
-async function validateUrlList(raw: unknown): Promise<UrlsOutcome> {
+async function validateUrlList(raw: unknown, route: string): Promise<UrlsOutcome> {
   if (!Array.isArray(raw) || raw.length === 0) {
     return { ok: false, status: 400, body: { error: "Missing 'urls' in body" } };
   }
@@ -74,7 +77,7 @@ async function validateUrlList(raw: unknown): Promise<UrlsOutcome> {
   }
   const urls: string[] = [];
   for (const item of raw) {
-    const outcome = await validateTarget(item);
+    const outcome = await validateTarget(item, route);
     if (!outcome.ok) return outcome;
     urls.push(outcome.url);
   }
@@ -110,7 +113,7 @@ function failUpstream(res: Response, e: unknown, label: string): void {
 
 router.post("/fetch", libryAuth, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const target = await validateTarget(body.url);
+  const target = await validateTarget(body.url, "fetch");
   if (!target.ok) return res.status(target.status).json(target.body);
 
   const format = typeof body.format === "string" && body.format.trim() ? body.format.trim() : "markdown";
@@ -134,7 +137,7 @@ router.post("/fetch", libryAuth, async (req: Request, res: Response) => {
 
 router.post("/crawl", libryAuth, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const target = await validateTarget(body.url);
+  const target = await validateTarget(body.url, "crawl");
   if (!target.ok) return res.status(target.status).json(target.body);
 
   const opts: Record<string, unknown> = {};
@@ -159,7 +162,7 @@ router.post("/crawl", libryAuth, async (req: Request, res: Response) => {
 
 router.post("/map", libryAuth, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const target = await validateTarget(body.url);
+  const target = await validateTarget(body.url, "map");
   if (!target.ok) return res.status(target.status).json(target.body);
 
   try {
@@ -176,7 +179,7 @@ router.post("/map", libryAuth, async (req: Request, res: Response) => {
 
 router.post("/extract", libryAuth, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const target = await validateTarget(body.url);
+  const target = await validateTarget(body.url, "extract");
   if (!target.ok) return res.status(target.status).json(target.body);
 
   // Contrainte WebClaw : /v1/extract exige un `schema` OU un `prompt`.
@@ -203,7 +206,7 @@ router.post("/extract", libryAuth, async (req: Request, res: Response) => {
 
 router.post("/batch", libryAuth, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const list = await validateUrlList(body.urls);
+  const list = await validateUrlList(body.urls, "batch");
   if (!list.ok) return res.status(list.status).json(list.body);
 
   try {

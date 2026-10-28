@@ -22,6 +22,14 @@
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync, statSync } from "fs";
 import path from "path";
+import {
+  MAX_LIST_ENTRIES,
+  normalizeCidrList,
+  normalizeHostEntry,
+  normalizeHostList,
+  parseCidrEntry,
+  splitList,
+} from "./utils/allowlist.js";
 
 // ── Emplacement (résolu depuis l'environnement SEUL) ──
 
@@ -148,7 +156,14 @@ export function writeSettings(updates: Record<string, string | null>): SettingsO
 
 // ── Catalogue déclaratif des réglages exposés ──
 
-export type SettingType = "string" | "number" | "boolean" | "stringList" | "path" | "secret";
+export type SettingType = "string" | "number" | "boolean" | "stringList" | "cidrList" | "hostList" | "path" | "secret";
+
+/**
+ * Groupe d'affichage « adresses internes » : rendu par une SECTION DÉDIÉE de
+ * l'interface (ajout/suppression d'entrées + avertissement), pas par le
+ * formulaire générique.
+ */
+export const INTERNAL_ACCESS_GROUP = "internal-access";
 
 export interface SettingSpec {
   name: string;
@@ -189,6 +204,12 @@ export const SETTINGS_SPEC: readonly SettingSpec[] = [
   { name: "LIBRY_LEGACY_KEYS", group: "security", type: "secret", default: "" },
   { name: "LIBRY_ADMIN_KEYS", group: "security", type: "secret", default: "" },
   { name: "LIBRY_UPDATE_CWDS", group: "security", type: "stringList", default: "" },
+
+  // ── Adresses internes autorisées (section dédiée de l'interface) ──
+  // Vide par défaut : Libry refuse TOUTES les adresses internes (comportement
+  // historique). Une entrée autorise explicitement une cible interne.
+  { name: "LIBRY_SSRF_ALLOWED_HOSTS", group: INTERNAL_ACCESS_GROUP, type: "hostList", default: "" },
+  { name: "LIBRY_SSRF_ALLOWED_CIDRS", group: INTERNAL_ACCESS_GROUP, type: "cidrList", default: "" },
 
   // ── Journalisation ──
   { name: "LIBRY_LOG_LEVEL", group: "logging", type: "string", default: "info" },
@@ -254,6 +275,30 @@ export function validateSettingValue(spec: SettingSpec, raw: unknown): Validatio
         .map((s) => s.trim())
         .filter(Boolean);
       return { ok: true, value: items.join(",") };
+    }
+    case "hostList": {
+      // Chaque entrée doit être un nom d'hôte exploitable ; la normalisation
+      // tolère une URL collée, un port, un point final ou un joker `*.domaine`.
+      const items = splitList(trimmed);
+      if (items.length > MAX_LIST_ENTRIES) {
+        return { ok: false, error: `${spec.name}: too many entries (max ${MAX_LIST_ENTRIES})` };
+      }
+      const invalid = items.filter((item) => normalizeHostEntry(item) === null);
+      if (invalid.length > 0) {
+        return { ok: false, error: `${spec.name}: invalid hostname(s) — ${invalid.join(", ")}` };
+      }
+      return { ok: true, value: normalizeHostList(trimmed).join(",") };
+    }
+    case "cidrList": {
+      const items = splitList(trimmed);
+      if (items.length > MAX_LIST_ENTRIES) {
+        return { ok: false, error: `${spec.name}: too many entries (max ${MAX_LIST_ENTRIES})` };
+      }
+      const invalid = items.filter((item) => parseCidrEntry(item) === null);
+      if (invalid.length > 0) {
+        return { ok: false, error: `${spec.name}: invalid CIDR or IP — ${invalid.join(", ")}` };
+      }
+      return { ok: true, value: normalizeCidrList(trimmed).join(",") };
     }
     case "secret":
     case "path":

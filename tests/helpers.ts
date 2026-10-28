@@ -8,6 +8,7 @@ import { resetSettingsCache } from "../src/settings-store.js";
 import { setSessionTtlForTests } from "../src/session-store.js";
 import { setFetchForTests, type FetchLike } from "../src/utils/http.js";
 import { setScrapeDelayForTests } from "../src/web-search.js";
+import { resetSsrfAuditLogForTests } from "../src/utils/ssrf.js";
 
 export interface TestEnv {
   app: Express;
@@ -94,6 +95,9 @@ export function makeTestEnv(overrides: Record<string, string> = {}): TestEnv {
   delete process.env.LIBRY_CHROMIUM_NO_SANDBOX;
   delete process.env.CHROMIUM_PATH;
   delete process.env.LIBRY_SESSION_TTL_HOURS;
+  // Liste blanche des adresses internes : VIDE par défaut (politique historique).
+  delete process.env.LIBRY_SSRF_ALLOWED_HOSTS;
+  delete process.env.LIBRY_SSRF_ALLOWED_CIDRS;
   // Moteur web : configuration neutralisée + réseau coupé.
   delete process.env.WEBCLAW_URL;
   delete process.env.WEBCLAW_API_KEY;
@@ -104,6 +108,7 @@ export function makeTestEnv(overrides: Record<string, string> = {}): TestEnv {
 
   resetAuthCaches();
   resetSettingsCache();
+  resetSsrfAuditLogForTests();
   setSessionTtlForTests(null);
   setFetchForTests(unreachableFetch);
   setScrapeDelayForTests(0);

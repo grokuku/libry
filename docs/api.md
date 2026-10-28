@@ -237,6 +237,42 @@ Stockage : `LIBRY_SHOTS_DIR` (défaut `$LIBRY_DATA_DIR/shots`), `<uuid>.png` +
 `<uuid>.json`. Purge périodique locale, **sans LLM**. Pi-Web conserve
 l'affichage : il télécharge l'image et la réinjecte dans ses pièces jointes.
 
+## Adresses internes (liste blanche anti-SSRF)
+
+La validation SSRF (`src/utils/ssrf.ts`) refuse **par défaut** toute adresse
+interne : loopback (`127/8`, `::1`), RFC1918 (`10/8`, `172.16/12`,
+`192.168/16`), `0.0.0.0/8`, CGNAT (`100.64/10`), ULA IPv6 (`fc00::/7`) — et
+**toujours** les adresses lien-local (`169.254/16`, dont les métadonnées cloud
+`169.254.169.254`), les formes IPv6 de transition (6to4, Teredo, NAT64,
+IPv4-mapped) étant ramenées à leur IPv4 effective.
+
+Deux réglages (`env ?? fichier ?? défaut`, **vides par défaut**) forment la
+liste blanche ; ils se configurent dans l'interface, onglet **Réglages →
+Adresses internes autorisées** (`GET`/`PUT /api/admin/settings`) :
+
+| Réglage | Type | Exemple | Effet |
+| --- | --- | --- | --- |
+| `LIBRY_SSRF_ALLOWED_HOSTS` | `hostList` | `switchy,pi-web,*.holaf.lan` | autorise **ce nom** à joindre le réseau interne |
+| `LIBRY_SSRF_ALLOWED_CIDRS` | `cidrList` | `10.10.0.0/16,192.168.1.20/32` | autorise **ces adresses**, quel que soit le nom |
+
+Règles appliquées (`resolveHttpTarget`) :
+
+1. politique **tout-ou-rien** : toutes les adresses résolues doivent être
+   autorisées, sinon `403` ;
+2. lien-local toujours refusée, même couverte par une plage autorisée ;
+3. nom autorisé : la résolution doit être **interne** ; une réponse **publique**
+   est refusée (garde anti **DNS-rebinding**) ;
+4. capture d'écran : l'IP validée est **épinglée** (`--host-resolver-rules`),
+   et la chaîne de **redirections** est vérifiée avant le spawn — une
+   redirection hors liste blanche répond `403 { "error": "URL not allowed" }` ;
+5. `file://`, identifiants dans l'URL, protocoles non http(s) : refusés.
+
+Chaque autorisation réellement utilisée est journalisée sans secret (nom d'hôte,
+IP, entrée de liste blanche, route appelante — jamais l'URL complète) :
+`[ssrf] internal access allowed route=… host=… ip=… via=…` et
+`GET /api/admin/ssrf-log` (admin) →
+`{ "entries": [ { "at", "route", "hostname", "ip", "grant": { "kind": "host"|"cidr", "entry" } } ] }`.
+
 ## Moteur web (Lot 6)
 
 Routes sous `/api/librarian`, **clé requise**. Elles exposent les capacités de

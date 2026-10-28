@@ -86,6 +86,31 @@ export function getLogLevel(): string {
   return readEnv("LIBRY_LOG_LEVEL", "info");
 }
 
+// ── Liste blanche des adresses internes (anti-SSRF) ──
+
+/**
+ * Noms d'hôtes internes autorisés (`switchy,pi-web,*.holaf.lan`). Vide par
+ * défaut : aucune adresse interne n'est joignable (politique historique).
+ */
+export function getSsrfAllowedHosts(): string[] {
+  return readEnv("LIBRY_SSRF_ALLOWED_HOSTS", "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Plages d'adresses internes autorisées (`10.10.0.0/16,192.168.1.0/24`). Vide
+ * par défaut. Les adresses lien-local (métadonnées cloud) restent TOUJOURS
+ * bloquées, même si une plage les couvre.
+ */
+export function getSsrfAllowedCidrs(): string[] {
+  return readEnv("LIBRY_SSRF_ALLOWED_CIDRS", "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
 // ── Moteur web (Lot 6) ──
 
 /**

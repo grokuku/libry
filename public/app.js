@@ -510,12 +510,14 @@
     const sessionView = $("session-view");
     const keysCard = $("keys-card");
     const settingsCard = $("settings-card");
+    const internalCard = $("internal-access-card");
     // La porte d'entrée : hors session, SEUL l'écran de connexion est affiché.
     if (loginScreen) loginScreen.hidden = state.authenticated;
     if (app) app.hidden = !state.authenticated;
     if (sessionView) sessionView.hidden = !state.authenticated;
     if (keysCard) keysCard.hidden = !state.authenticated;
     if (settingsCard) settingsCard.hidden = !state.authenticated;
+    if (internalCard) internalCard.hidden = !state.authenticated;
     const status = $("session-status");
     if (status) {
       status.textContent = state.authenticated
@@ -1125,6 +1127,9 @@
     settingState.clear();
 
     for (const group of groups) {
+      // La liste blanche des adresses internes a sa PROPRE section (ajout /
+      // suppression d'entrées + avertissement) : elle n'apparaît pas ici.
+      if (group.id === INTERNAL_ACCESS_GROUP) continue;
       const section = h("section", { class: "settings-group" });
       section.append(h("h4", { text: group.id }));
       for (const spec of group.settings) {
@@ -1132,6 +1137,8 @@
       }
       container.append(section);
     }
+
+    renderInternalAccess(groups);
   }
 
   function renderSettingRow(spec) {
@@ -1221,6 +1228,7 @@
       const data = await apiRequest("/api/admin/settings");
       state.settingsGroups = Array.isArray(data && data.groups) ? data.groups : [];
       renderSettings(state.settingsGroups);
+      loadSsrfLog();
     } catch (err) {
       handleApiError(err, "Impossible de charger les paramètres.");
     }
@@ -1273,6 +1281,261 @@
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  // Adresses internes autorisées (liste blanche anti-SSRF)
+  //
+  // Deux réglages, VIDES par défaut :
+  //   LIBRY_SSRF_ALLOWED_HOSTS → noms d'hôtes (switchy, pi-web, *.holaf.lan)
+  //   LIBRY_SSRF_ALLOWED_CIDRS → plages (10.10.0.0/16, 192.168.1.20/32)
+  // L'interface n'ajoute/retire que des ENTRÉES (une par une) ; l'enregistrement
+  // écrit la liste complète dans config.json via PUT /api/admin/settings.
+  // ════════════════════════════════════════════════════════════════════════
+
+  const INTERNAL_ACCESS_GROUP = "internal-access";
+  const ALLOW_HOSTS_SETTING = "LIBRY_SSRF_ALLOWED_HOSTS";
+  const ALLOW_CIDRS_SETTING = "LIBRY_SSRF_ALLOWED_CIDRS";
+
+  /** Modèle local de la liste blanche (édité puis enregistré d'un bloc). */
+  const allowlist = { hosts: [], cidrs: [], specs: { hosts: null, cidrs: null } };
+
+  /** Découpe une valeur de réglage (`a,b , c`) en entrées non vides. */
+  function splitList(value) {
+    return String(value || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  /** Valide une saisie de NOM d'hôte (tolère une URL collée, un port). */
+  function sanitizeHostInput(raw) {
+    let value = String(raw || "").trim().toLowerCase();
+    value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#]/)[0];
+    value = value.replace(/^[^@]*@/, "");
+    if (value.startsWith("[")) value = value.split("]")[0].slice(1);
+    else if (value.split(":").length === 2) value = value.split(":")[0];
+    value = value.replace(/\.$/, "");
+    if (value === "") return { error: "Entrez un nom d'hôte (ex. switchy)." };
+    if (/^[0-9.]+$/.test(value) || value.includes(":")) {
+      return { error: "Une adresse IP va dans les plages (CIDR), pas dans les noms d'hôtes." };
+    }
+    const labels = value.replace(/^\*\./, "").split(".");
+    const label = /^[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?$/;
+    if (!labels.every((part) => label.test(part))) {
+      return { error: "Nom d'hôte invalide (lettres, chiffres, tirets et points)." };
+    }
+    return { value };
+  }
+
+  /** Valide une saisie de PLAGE (CIDR ou adresse seule). */
+  function sanitizeCidrInput(raw) {
+    const value = String(raw || "").trim();
+    if (value === "") return { error: "Entrez une plage (ex. 10.10.0.0/16)." };
+    const match = value.match(/^([0-9a-fA-F:.]+)(?:\/(\d{1,3}))?$/);
+    if (!match) return { error: "Plage invalide : format attendu 10.10.0.0/16 ou 192.168.1.20/32." };
+    if (match[2] !== undefined) {
+      const maxBits = match[1].includes(":") ? 128 : 32;
+      if (Number(match[2]) > maxBits) return { error: `Le préfixe doit être ≤ /${maxBits}.` };
+    }
+    return { value };
+  }
+
+  /** (Re)dessine les pastilles d'une liste (noms d'hôtes ou plages). */
+  function renderChips(kind) {
+    const isHost = kind === "hosts";
+    const list = $(isHost ? "allowlist-hosts" : "allowlist-cidrs");
+    const empty = $(isHost ? "allowlist-hosts-empty" : "allowlist-cidrs-empty");
+    if (!list) return;
+    const spec = allowlist.specs[kind];
+    const editable = Boolean(spec && spec.editable);
+    const items = allowlist[kind];
+    list.replaceChildren();
+    if (empty) empty.hidden = items.length > 0;
+
+    for (const item of items) {
+      const chip = h("li", { class: "chip" });
+      chip.append(h("span", { class: "chip-label", text: item }));
+      if (editable) {
+        chip.append(
+          iconButton("trash", "", {
+            class: "icon-btn icon-btn--danger",
+            attrs: { title: `Retirer ${item}`, "aria-label": `Retirer ${item}` },
+            on: {
+              click: () => {
+                allowlist[kind] = allowlist[kind].filter((entry) => entry !== item);
+                renderChips(kind);
+                updateAllowlistWarning();
+              },
+            },
+          }),
+        );
+      }
+      list.append(chip);
+    }
+  }
+
+  /** Avertissement visible dès qu'au moins une entrée autorise le réseau interne. */
+  function updateAllowlistWarning() {
+    const warning = $("internal-access-warning");
+    if (warning) warning.hidden = allowlist.hosts.length + allowlist.cidrs.length === 0;
+  }
+
+  /** Applique l'état serveur de la liste blanche à la section dédiée. */
+  function renderInternalAccess(groups) {
+    const card = $("internal-access-card");
+    if (!card) return;
+    const group = (groups || []).find((g) => g.id === INTERNAL_ACCESS_GROUP);
+    if (!group) {
+      card.hidden = true;
+      return;
+    }
+
+    const specOf = (name) => (group.settings || []).find((spec) => spec.name === name) || null;
+    const hostsSpec = specOf(ALLOW_HOSTS_SETTING);
+    const cidrsSpec = specOf(ALLOW_CIDRS_SETTING);
+
+    allowlist.specs = { hosts: hostsSpec, cidrs: cidrsSpec };
+    allowlist.hosts = splitList(hostsSpec && hostsSpec.value);
+    allowlist.cidrs = splitList(cidrsSpec && cidrsSpec.value);
+
+    renderChips("hosts");
+    renderChips("cidrs");
+    updateAllowlistWarning();
+
+    // Champs verrouillés quand le réglage vient de l'ENVIRONNEMENT (env ?? fichier).
+    const hostInput = $("allowlist-host-input");
+    const cidrInput = $("allowlist-cidr-input");
+    const hostLocked = Boolean(hostsSpec && hostsSpec.source === "env" && hostsSpec.editable === false);
+    const cidrLocked = Boolean(cidrsSpec && cidrsSpec.source === "env" && cidrsSpec.editable === false);
+    if (hostInput) hostInput.disabled = hostLocked;
+    if (cidrInput) cidrInput.disabled = cidrLocked;
+    const hostSubmit = document.querySelector("#allowlist-host-form button");
+    const cidrSubmit = document.querySelector("#allowlist-cidr-form button");
+    if (hostSubmit) hostSubmit.disabled = hostLocked;
+    if (cidrSubmit) cidrSubmit.disabled = cidrLocked;
+    const save = $("internal-access-save");
+    if (save) save.disabled = hostLocked && cidrLocked;
+
+    card.hidden = !state.authenticated;
+  }
+
+  /** Message d'erreur en ligne d'un formulaire d'ajout ("" = masqué). */
+  function setAllowlistError(elementId, message) {
+    const el = $(elementId);
+    if (!el) return;
+    el.textContent = message || "";
+    el.hidden = !message;
+  }
+
+  /** Ajoute une entrée validée à la liste locale. */
+  function addAllowlistEntry(kind, raw, errorElementId) {
+    const parsed = kind === "hosts" ? sanitizeHostInput(raw) : sanitizeCidrInput(raw);
+    if (parsed.error) {
+      setAllowlistError(errorElementId, parsed.error);
+      return false;
+    }
+    setAllowlistError(errorElementId, "");
+    if (allowlist[kind].includes(parsed.value)) {
+      setAllowlistError(errorElementId, "Cette entrée est déjà dans la liste.");
+      return false;
+    }
+    allowlist[kind].push(parsed.value);
+    renderChips(kind);
+    updateAllowlistWarning();
+    return true;
+  }
+
+  /** Enregistre la liste blanche (écrit config.json, à chaud). */
+  async function saveInternalAccess() {
+    const payload = {};
+    const plan = [
+      [ALLOW_HOSTS_SETTING, "hosts"],
+      [ALLOW_CIDRS_SETTING, "cidrs"],
+    ];
+    for (const [name, kind] of plan) {
+      const spec = allowlist.specs[kind];
+      if (!spec || !spec.editable) continue;
+      const next = allowlist[kind].join(",");
+      if (next === String(spec.value || "")) continue;
+      payload[name] = next === "" ? null : next; // null = retour au défaut (vide)
+    }
+
+    if (Object.keys(payload).length === 0) {
+      notify("Aucune modification à enregistrer.", "info");
+      return;
+    }
+
+    try {
+      const data = await apiRequest("/api/admin/settings", {
+        method: "PUT",
+        body: { settings: payload },
+        csrf: state.csrfToken,
+      });
+      notify("Liste blanche enregistrée.");
+      if (Array.isArray(data && data.groups)) {
+        state.settingsGroups = data.groups;
+        renderSettings(state.settingsGroups);
+      } else {
+        await loadSettings();
+      }
+    } catch (err) {
+      handleApiError(err, "Échec de l'enregistrement de la liste blanche.");
+    }
+  }
+
+  /** Journal des autorisations d'adresses internes réellement utilisées. */
+  async function loadSsrfLog() {
+    if (!state.authenticated) return;
+    const list = $("ssrf-log");
+    const empty = $("ssrf-log-empty");
+    if (!list) return;
+    try {
+      const data = await apiRequest("/api/admin/ssrf-log");
+      const entries = Array.isArray(data && data.entries) ? data.entries : [];
+      list.replaceChildren();
+      if (empty) empty.hidden = entries.length > 0;
+      for (const entry of entries) {
+        const main = h("div", { class: "list-main" });
+        const nameRow = h("div", { class: "list-name" });
+        nameRow.append(h("span", { text: entry.hostname || "?" }));
+        if (entry.route) nameRow.append(detailBadge(String(entry.route)));
+        main.append(nameRow);
+        const sub = h("div", { class: "list-sub" });
+        if (entry.ip) sub.append(h("span", { text: entry.ip }));
+        if (entry.grant && entry.grant.entry) {
+          sub.append(h("span", { text: `via ${entry.grant.kind === "cidr" ? "plage" : "nom"} ${entry.grant.entry}` }));
+        }
+        if (entry.at) sub.append(h("span", { text: fmtDate(entry.at) }));
+        main.append(sub);
+        list.append(h("li", {}, main));
+      }
+    } catch {
+      // Journal indisponible : la section reste utilisable (aucun blocage).
+    }
+  }
+
+  function wireInternalAccess() {
+    const hostForm = $("allowlist-host-form");
+    if (hostForm) {
+      hostForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const input = $("allowlist-host-input");
+        if (input && addAllowlistEntry("hosts", input.value, "allowlist-host-error")) input.value = "";
+      });
+    }
+
+    const cidrForm = $("allowlist-cidr-form");
+    if (cidrForm) {
+      cidrForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const input = $("allowlist-cidr-input");
+        if (input && addAllowlistEntry("cidrs", input.value, "allowlist-cidr-error")) input.value = "";
+      });
+    }
+
+    const save = $("internal-access-save");
+    if (save) save.addEventListener("click", () => saveInternalAccess());
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   // Démarrage
   // ════════════════════════════════════════════════════════════════════════
 
@@ -1306,5 +1569,6 @@
   wirePasswordChange();
   wireKeys();
   wireSettings();
+  wireInternalAccess();
   refreshSession();
 })();

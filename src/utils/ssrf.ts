@@ -6,8 +6,21 @@
  * Règles (politique TOUT-OU-RIEN : une seule adresse sensible suffit à refuser) :
  *  - protocole http/https uniquement (donc file://, ftp://, data://… refusés) ;
  *  - identifiants dans l'URL refusés (http://user:pass@host/) ;
- *  - adresses lien-local (ex. 169.254.169.254, métadonnées cloud) TOUJOURS bloquées ;
- *  - adresses loopback/privées bloquées par défaut, sauf autorisation explicite.
+ *  - adresses lien-local (ex. 169.254.169.254, métadonnées cloud) TOUJOURS bloquées,
+ *    même si une plage autorisée couvre 169.254.0.0/16 (garde absolue) ;
+ *  - adresses loopback/privées/internes bloquées par défaut, SAUF si la cible est
+ *    couverte par la LISTE BLANCHE explicite de l'administrateur
+ *    (`LIBRY_SSRF_ALLOWED_HOSTS` / `LIBRY_SSRF_ALLOWED_CIDRS`, vide par défaut →
+ *    comportement historique strictement inchangé).
+ *
+ * Liste blanche (voir `utils/allowlist.ts` pour la syntaxe) :
+ *  - PLAGE CIDR (`10.10.0.0/16`) : autorise CES adresses, quel que soit le nom ;
+ *  - NOM D'HÔTE (`switchy`) : autorise ce nom — et SEULEMENT lui — à joindre le
+ *    réseau interne. Garde anti DNS-rebinding : si le nom autorisé résout vers
+ *    une adresse NON interne (publique), la cible est REFUSÉE (une réponse
+ *    publique pour un nom interne = rebinding / détournement de DNS).
+ *  - Chaque autorisation réellement utilisée est journalisée (sans secret) dans
+ *    un tampon circulaire consultable depuis l'interface (`getSsrfAuditLog`).
  *
  * La résolution DNS est faite au moment de la validation. Pour la capture
  * d'écran (anti DNS-rebinding), `resolveHttpTarget` retourne EN PLUS les IP
@@ -18,11 +31,33 @@
 
 import { lookup } from "dns/promises";
 import { isIP } from "net";
+import { getSsrfAllowedCidrs, getSsrfAllowedHosts } from "../config.js";
+import { normalizeCidrList, normalizeHostList, parseCidrEntry } from "./allowlist.js";
+
+/** Liste blanche des adresses internes (vide par défaut = politique stricte). */
+export interface SsrfPolicy {
+  /** Noms d'hôtes autorisés (`switchy`, `*.holaf.lan`), normalisés en minuscules. */
+  hosts: string[];
+  /** Plages CIDR autorisées (`10.10.0.0/16`), ou IP seules (= /32, /128). */
+  cidrs: string[];
+}
+
+/** Autorisation effectivement appliquée à une cible (pour le journal). */
+export interface SsrfGrant {
+  /** `cidr` = autorisation par plage, `host` = autorisation par nom d'hôte. */
+  kind: "cidr" | "host";
+  /** Entrée de la liste blanche qui a autorisé la cible. */
+  entry: string;
+}
 
 export interface SsrfOptions {
+  /** Liste blanche explicite (prioritaire sur la configuration). */
+  policy?: SsrfPolicy;
+  /** Libellé d'appel (route) porté dans le journal des autorisations. */
+  route?: string;
+  /** Échappatoires historiques (aucun appelant : conservées pour compatibilité). */
   allowPrivate?: boolean;
   allowLoopback?: boolean;
-  allowLinkLocal?: boolean;
 }
 
 /** Cible HTTP validée : URL normalisée + adresses résolues (pour l'épinglage). */
@@ -38,6 +73,8 @@ export interface ResolvedHttpTarget {
    * ou null quand le nom d'hôte est déjà une IP littérale (aucun DNS à épingler).
    */
   pinnedIp: string | null;
+  /** Autorisation liste blanche utilisée (`null` = cible publique, sans objet). */
+  grant: SsrfGrant | null;
 }
 
 /** Retire les crochets d'une IPv6 renvoyée par URL.hostname. */
@@ -165,6 +202,108 @@ export function isPrivateIp(ip: string): boolean {
   return /^f[cd]/i.test(ip);
 }
 
+/** Vrai si l'adresse (IPv4 ou IPv6) appartient au réseau interne/privé. */
+export function isInternalAddress(ip: string): boolean {
+  if (isLoopbackIp(ip) || isPrivateIp(ip)) return true;
+  const v4 = effectiveIpv4(ip);
+  // CGNAT 100.64.0.0/10 : plage interne des opérateurs / overlay Docker.
+  return v4 !== null && v4[0] === 100 && v4[1] >= 64 && v4[1] <= 127;
+}
+
+/** Représentation binaire d'une adresse, utilisée pour la comparaison CIDR. */
+function ipToBytes(ip: string): { bytes: number[]; family: 4 | 6 } | null {
+  const v4 = effectiveIpv4(ip);
+  if (v4) return { bytes: v4, family: 4 };
+  const groups = parseIpv6Groups(ip);
+  if (!groups) return null;
+  const bytes: number[] = [];
+  for (const group of groups) bytes.push((group >> 8) & 0xff, group & 0xff);
+  return { bytes, family: 6 };
+}
+
+/** Vrai si `ip` appartient à la plage `entry` (CIDR ou IP seule). */
+export function ipInCidr(ip: string, entry: string): boolean {
+  const cidr = parseCidrEntry(entry);
+  if (!cidr) return false;
+  const address = ipToBytes(cidr.address);
+  const candidate = ipToBytes(ip);
+  if (!address || !candidate || address.family !== candidate.family) return false;
+
+  let remaining = cidr.bits;
+  for (let i = 0; i < address.bytes.length && remaining > 0; i++) {
+    const take = Math.min(8, remaining);
+    const mask = take === 8 ? 0xff : (0xff << (8 - take)) & 0xff;
+    if ((address.bytes[i] & mask) !== (candidate.bytes[i] & mask)) return false;
+    remaining -= take;
+  }
+  return true;
+}
+
+/** Première plage de la liste blanche qui couvre `ip`, ou `null`. */
+function matchCidrEntry(ip: string, cidrs: string[]): string | null {
+  for (const entry of cidrs) if (ipInCidr(ip, entry)) return entry;
+  return null;
+}
+
+/**
+ * Entrée de la liste blanche qui autorise `hostname` (correspondance EXACTE ou
+ * joker de suffixe `*.domaine`), ou `null`. L'IP littérale d'une URL ne peut
+ * pas être autorisée par nom : seules les plages couvrent les littéraux.
+ */
+export function matchHostEntry(hostname: string, hosts: string[]): string | null {
+  const host = stripBrackets(hostname).toLowerCase().replace(/\.$/, "");
+  if (host === "" || isIP(host) !== 0) return null;
+  for (const entry of hosts) {
+    const pattern = entry.toLowerCase();
+    if (pattern.startsWith("*.")) {
+      const suffix = pattern.slice(1); // `.holaf.lan`
+      if (host.endsWith(suffix) && host.length > suffix.length) return entry;
+      continue;
+    }
+    if (host === pattern) return entry;
+  }
+  return null;
+}
+
+/** Liste blanche effective : option explicite, sinon configuration `env ?? fichier`. */
+export function resolveSsrfPolicy(options: SsrfOptions = {}): SsrfPolicy {
+  if (options.policy) return options.policy;
+  return {
+    hosts: normalizeHostList(getSsrfAllowedHosts().join(",")),
+    cidrs: normalizeCidrList(getSsrfAllowedCidrs().join(",")),
+  };
+}
+
+// ── Journal des autorisations (tampon circulaire, sans secret) ──
+
+/** Une autorisation utilisée : QUI (route) a ouvert QUOI (hôte → IP). */
+export interface SsrfAuditEntry {
+  at: string;
+  route: string;
+  hostname: string;
+  ip: string;
+  grant: SsrfGrant;
+}
+
+const AUDIT_MAX = 100;
+const auditLog: SsrfAuditEntry[] = [];
+
+/** Ajoute une autorisation au journal (les plus récentes en premier). */
+function recordGrant(entry: SsrfAuditEntry): void {
+  auditLog.unshift(entry);
+  if (auditLog.length > AUDIT_MAX) auditLog.length = AUDIT_MAX;
+}
+
+/** Journal des autorisations utilisées (les plus récentes en premier). */
+export function getSsrfAuditLog(limit = 50): SsrfAuditEntry[] {
+  return auditLog.slice(0, Math.max(0, limit));
+}
+
+/** Vide le journal (outil de test). */
+export function resetSsrfAuditLogForTests(): void {
+  auditLog.length = 0;
+}
+
 /**
  * Valide une URL http/https et bloque toute adresse sensible (politique
  * tout-ou-rien). Retourne l'URL normalisée.
@@ -217,23 +356,89 @@ export async function resolveHttpTarget(
   }
   if (ips.length === 0) throw new Error(`DNS resolution failed for hostname: ${hostname}`);
 
-  // Politique TOUT-OU-RIEN : la moindre adresse sensible invalide la cible.
+  const policy = resolveSsrfPolicy(options);
+  const hostGrant = matchHostEntry(hostname, policy.hosts);
+
+  // Politique TOUT-OU-RIEN : la moindre adresse sensible non autorisée
+  // invalide la cible.
+  let grant: SsrfGrant | null = null;
   for (const ip of ips) {
-    if (isLinkLocalIp(ip) && !options.allowLinkLocal) {
+    // Lien-local : refus ABSOLU (métadonnées cloud 169.254.169.254 incluses),
+    // même si une plage autorisée couvre 169.254.0.0/16.
+    if (isLinkLocalIp(ip)) {
       throw new Error(`Blocked link-local address: ${ip}`);
     }
-    if (isLoopbackIp(ip) && !options.allowLoopback) {
-      throw new Error(`Blocked loopback address: ${ip}`);
+
+    if (isInternalAddress(ip)) {
+      const cidrEntry = matchCidrEntry(ip, policy.cidrs);
+      if (cidrEntry) {
+        grant = grant ?? { kind: "cidr", entry: cidrEntry };
+        continue;
+      }
+      if (hostGrant) {
+        grant = grant ?? { kind: "host", entry: hostGrant };
+        continue;
+      }
+      if (isLoopbackIp(ip) && options.allowLoopback) continue;
+      if (isPrivateIp(ip) && options.allowPrivate) continue;
+      throw new Error(
+        isLoopbackIp(ip) ? `Blocked loopback address: ${ip}` : `Blocked private address: ${ip}`,
+      );
     }
-    if (isPrivateIp(ip) && !options.allowPrivate) {
-      throw new Error(`Blocked private address: ${ip}`);
+
+    // Adresse PUBLIQUE (déjà acceptée avant la liste blanche). Si le nom est
+    // autorisé par nom, une réponse publique est un signe de DNS-rebinding ou
+    // de détournement : on refuse (un nom interne ne résout pas en public).
+    if (hostGrant) {
+      throw new Error(`Blocked public address for allow-listed hostname: ${ip}`);
     }
   }
 
-  return {
+  const target: ResolvedHttpTarget = {
     url: url.toString(),
     hostname,
     ips,
     pinnedIp: direct ? null : ips[0],
+    grant,
   };
+
+  if (grant) {
+    const audit: SsrfAuditEntry = {
+      at: new Date().toISOString(),
+      route: options.route ?? "unknown",
+      hostname,
+      ip: ips[0],
+      grant,
+    };
+    recordGrant(audit);
+    // Trace serveur : QUI a ouvert QUOI (nom, IP, entrée de liste blanche).
+    // Jamais d'URL complète (elle peut porter des paramètres sensibles).
+    console.log(`[ssrf] internal access allowed route=${audit.route} host=${hostname} ip=${audit.ip} via=${grant.kind}:${grant.entry}`);
+  }
+
+  return target;
+}
+
+/**
+ * Valide une CIBLE DE REDIRECTION (en-tête `Location`, absolu ou relatif) avec
+ * la MÊME politique que la cible initiale. Lève `Blocked…` si la redirection
+ * sort de la liste blanche — une cible autorisée ne peut pas rebondir vers une
+ * adresse qui ne l'est pas.
+ */
+export async function assertRedirectAllowed(
+  baseUrl: string,
+  location: string,
+  options: SsrfOptions = {},
+): Promise<string> {
+  let absolute: URL;
+  try {
+    absolute = new URL(location, baseUrl);
+  } catch {
+    throw new Error("Blocked redirect with an invalid target");
+  }
+  if (absolute.protocol !== "http:" && absolute.protocol !== "https:") {
+    throw new Error(`Blocked redirect to a non-http(s) URL: ${absolute.protocol}`);
+  }
+  const target = await resolveHttpTarget(absolute.toString(), options);
+  return target.url;
 }
