@@ -134,6 +134,42 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Secours AVANT la construction : les pulls anonymes sont quota-tés par
+      # adresse IP sur les registres publics (ECR Public : « 429 Too Many
+      # Requests · toomanyrequests ») et les runners GitHub partagent leurs IP.
+      # On tire donc l'image de base ici, avec trois tentatives et un délai
+      # croissant ; `build-push-action` la réutilise ensuite depuis le cache
+      # local. L'image est LUE dans le Dockerfile (source de vérité unique),
+      # donc rien à maintenir ici. Aucun identifiant : le registre visé est public.
+      - name: Prétélécharger l'image de base (3 tentatives)
+        run: |
+          set -euo pipefail
+          # Tous les FROM distincts du Dockerfile (build + runtime), en
+          # ignorant une éventuelle option `--platform=...` avant l'image.
+          mapfile -t BASES < <(awk '/^FROM[[:space:]]/ { img = ($2 ~ /^--/) ? $3 : $2; print img }' Dockerfile | sort -u)
+          if [ "${#BASES[@]}" -eq 0 ]; then
+            echo "::error::aucun FROM trouvé dans le Dockerfile."
+            exit 1
+          fi
+          for BASE in "${BASES[@]}"; do
+            echo "Image de base : ${BASE}"
+            pulled=""
+            for i in 1 2 3; do
+              if docker pull "${BASE}"; then
+                pulled="oui"
+                break
+              fi
+              if [ "${i}" -lt 3 ]; then
+                echo "::warning::tentative ${i}/3 échouée pour ${BASE}, nouvelle tentative dans $((i*10))s…"
+                sleep $((i*10))
+              fi
+            done
+            if [ -z "${pulled}" ]; then
+              echo "::error::impossible de tirer ${BASE} après 3 tentatives (quota du registre ? voir le FROM du Dockerfile)."
+              exit 1
+            fi
+          done
+
       # Construction locale (`load: true`) avec le cache de build GitHub :
       # indispensable pour la couche Chromium + polices, lourde et stable.
       - name: Build image
